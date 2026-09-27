@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Tokens de diseño — Paleta de colores según CLAUDE.md
+   ============================================================ */
+
+:root {
+  /* Fondos */
+  --bg-base: #fafaf9;          /* fondo claro principal */
+  --bg-surface: #ffffff;       /* cards, modales */
+  --bg-subtle: #f4f4f3;        /* secciones levemente distintas */
+
+  /* Texto */
+  --text-primary: #18181b;
+  --text-secondary: #71717a;
+  --text-disabled: #a1a1aa;
+
+  /* Color primario — verde sobrio (no neón fitness) */
+  --color-primary: #2f9e44;
+  --color-primary-light: #40c057;
+  --color-primary-dark: #237032;
+  --color-primary-muted: #ebf7ee;
+
+  /* Macros — colores fijos y consistentes en toda la app */
+  --color-protein: #3b82f6;        /* azul — proteína */
+  --color-protein-muted: #eff6ff;
+  --color-carbs: #f59e0b;          /* ámbar/naranja — carbohidratos */
+  --color-carbs-muted: #fffbeb;
+  --color-fat: #a855f7;            /* morado — grasa */
+  --color-fat-muted: #faf5ff;
+
+  /* Estado: exceso de meta */
+  --color-danger: #f03e3e;
+  --color-danger-muted: #fff5f5;
+
+  /* Bordes y separadores */
+  --border-base: #e4e4e7;
+  --border-subtle: #f4f4f5;
+
+  /* Sombras */
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08);
+  --shadow-md: 0 4px 12px 0 rgb(0 0 0 / 0.10);
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-base: #18181b;
+    --bg-surface: #27272a;
+    --bg-subtle: #3f3f46;
+
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-disabled: #71717a;
+
+    --color-primary: #40c057;
+    --color-primary-light: #51cf66;
+    --color-primary-dark: #2f9e44;
+    --color-primary-muted: #14291b;
+
+    --color-protein-muted: #172554;
+    --color-carbs-muted: #292524;
+    --color-fat-muted: #2e1065;
+
+    --color-danger-muted: #3b0f0f;
+
+    --border-base: #3f3f46;
+    --border-subtle: #27272a;
+  }
+}
+
+/* ============================================================
+   Registro de tokens en Tailwind v4 (@theme inline)
+   ============================================================ */
+
+@theme inline {
+  /* Mapeamos nuestros tokens a clases de Tailwind */
+
+  /* Fondos */
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-subtle: var(--bg-subtle);
+
+  /* Texto */
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-disabled: var(--text-disabled);
+
+  /* Primario */
+  --color-primary: var(--color-primary);
+  --color-primary-light: var(--color-primary-light);
+  --color-primary-dark: var(--color-primary-dark);
+  --color-primary-muted: var(--color-primary-muted);
+
+  /* Macros */
+  --color-protein: var(--color-protein);
+  --color-protein-muted: var(--color-protein-muted);
+  --color-carbs: var(--color-carbs);
+  --color-carbs-muted: var(--color-carbs-muted);
+  --color-fat: var(--color-fat);
+  --color-fat-muted: var(--color-fat-muted);
+
+  /* Peligro/exceso */
+  --color-danger: var(--color-danger);
+  --color-danger-muted: var(--color-danger-muted);
+
+  /* Bordes */
+  --color-border: var(--border-base);
+  --color-border-subtle: var(--border-subtle);
+
+  /* Tipografía */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ============================================================
+   Estilos base del body
+   ============================================================ */
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
