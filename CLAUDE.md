@@ -4,7 +4,7 @@
 > a medida que evolucione el diseño y la arquitectura, para que cualquier sesión
 > de trabajo (humana o de Claude Code) parta con el mismo contexto.
 >
-> Última actualización: 2026-10-04 (rama `feature/app-completa`).
+> Última actualización: 2026-10-05 (rama `feature/app-completa`). Producción: https://nutricion-app-theta.vercel.app (Vercel, despliegue por push a `main`; ver §6.1).
 
 ## 1. Concepto
 
@@ -107,7 +107,7 @@ app/
   (app)/shopping/            → lista de compras (?week=lunes)
   (app)/recipes/             → lista, new/, [id]/, [id]/edit/, suggested/[id]/
   (app)/profile/ (+ edit/)
-  api/analyze-meal/route.ts  → POST, Node runtime, maxDuration 45 s
+  api/analyze-meal/route.ts  → POST, Node runtime, maxDuration 60 s
 components/
   ui/        → Button, Card, Field, ChoiceCard/Segmented/Stepper, Sheet (<dialog>), Page, icons
   meal/      → CalorieRing, MacroBar/MacroInline, MealSection/MacroSplitBar, FoodEditorList
@@ -119,20 +119,24 @@ components/
 lib/
   firebase.ts          → client SDK; caché persistente (IndexedDB); emuladores si NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true
   firebase-admin.ts    → Admin SDK perezoso (server-only); modo emulador sin credenciales
-  auth-context.tsx     → useAuth; crea users/{uid} en el primer login; hook __testSignIn solo con emuladores
+  auth-context.tsx     → useAuth; login con Google (popup o redirect según auth-strategy); crea users/{uid} en el primer login; hook __testSignIn solo con emuladores
+  auth-strategy.ts     → puro: elige popup/redirect, detecta navegadores integrados, mensajes de error de login
   profile-context.tsx  → useProfile (listener único de users/{uid})
   nutrition.ts, profile.ts, meals.ts, recipes.ts, shopping.ts, progress.ts, dates.ts, macros.ts
   db.ts, hooks.ts      → escrituras y suscripciones Firestore
   offline.ts           → settleWrite: no colgarse esperando confirmación sin conexión
   food-db.ts           → base local de alimentos
-  image-compress.ts, api-client.ts
+  image-compress.ts    → reduce a 1024 px / JPEG 0,8 (reintenta más fuerte si pesa > 1,5 MB)
+  api-client.ts        → fetch a /api/analyze-meal con token, timeout 55 s y chequeo offline
+  api-errors.ts        → puro: traduce errores HTTP (incluidos 413/504 de Vercel sin JSON) a mensajes claros
   ai/gemini.ts         → llamada REST a Gemini con JSON schema (server-only)
   ai/parse.ts          → validación Zod + normalización (puro)
-  ai/image.ts          → magic bytes y límites
-  server/              → auth (verifyIdToken), ai-quota, rate-limit, http
+  ai/image.ts          → magic bytes y límites (3 MB)
+  server/              → auth (verifyIdToken), ai-quota, rate-limit, http, service-account (normaliza las credenciales Admin del entorno)
 types/index.ts
-firestore.rules, storage.rules, firebase.json, firestore.indexes.json
-tests/unit, tests/rules, tests/e2e (+ fixtures)
+firestore.rules, storage.rules, firebase.json, firestore.indexes.json, .firebaserc
+tests/unit, tests/rules, tests/e2e (+ fixtures), tests/prod (humo contra la URL desplegada)
+playwright.config.ts (E2E con emuladores), playwright.prod.config.ts (humo contra PROD_URL)
 scripts/generate-icons.mjs
 ```
 
@@ -153,12 +157,25 @@ No se necesitan índices compuestos (las consultas usan un solo campo; el orden 
 
 **Flujo de registro por foto:**
 1. El cliente comprime la foto (canvas) y la envía directo a `/api/analyze-meal` con `Authorization: Bearer <ID token>`.
-2. El handler: verifica el token (con chequeo de revocación) → límite 6/min por usuario (memoria) → valida tamaño (≤ 4 MB) y tipo real por magic bytes (JPEG/PNG/WebP) → suma 1 al contador diario (`aiUsage`, tope `AI_DAILY_LIMIT_PER_USER`, 40 por defecto) → llama a Gemini con JSON schema → valida con Zod, acota valores y **recalcula totales**.
-3. Errores mapeados con mensajes claros: 401 sin sesión, 413/415 imagen, 422 sin comida, 429 cuota (con `Retry-After`), 503 IA caída (1 reintento automático) o mal configurada, 504 timeout. Si el fallo no es culpa del usuario se devuelve el intento del contador.
+2. El handler: verifica el token (con chequeo de revocación) → límite 6/min por usuario (memoria) → valida tamaño (≤ 3 MB; Vercel corta en ~4,5 MB) y tipo real por magic bytes (JPEG/PNG/WebP) → suma 1 al contador diario (`aiUsage`, tope `AI_DAILY_LIMIT_PER_USER`, 40 por defecto) → llama a Gemini con JSON schema → valida con Zod, acota valores y **recalcula totales**.
+3. Errores mapeados con mensajes claros: 401 sin sesión, 413/415 imagen, 422 sin comida, 429 cuota (con `Retry-After`), 503 IA caída (1 reintento automático) o mal configurada, 504 timeout. Si el fallo no es culpa del usuario se devuelve el intento del contador. Tiempos: Gemini 22 s por intento (+1,5 s de espera) < `maxDuration` 60 s; el cliente espera como máximo 55 s. Si la plataforma responde sin JSON (413/502/503/504 de Vercel), `lib/api-errors.ts` deduce el mensaje por código HTTP.
 4. El cliente muestra la revisión; al guardar escribe en `users/{uid}/meals`. La foto nunca se persiste.
 5. Home se actualiza en tiempo real (listener de Firestore).
 
-**Seguridad:** `firestore.rules` con reglas explícitas por subcolección: solo el dueño (`request.auth.uid == userId` y `data.uid == userId`), `hasOnly` de campos, tipos/rangos/tamaños; cualquier otra ruta denegada. `aiUsage` solo lectura para el cliente. `storage.rules` deniega todo. Cabeceras de seguridad en `next.config.ts`.
+**Seguridad:** `firestore.rules` con reglas explícitas por subcolección: solo el dueño (`request.auth.uid == userId` y `data.uid == userId`), `hasOnly` de campos, tipos/rangos/tamaños; cualquier otra ruta denegada. `aiUsage` solo lectura para el cliente. `storage.rules` deniega todo. Cabeceras de seguridad en `next.config.ts` (`X-Frame-Options: DENY` salvo `SAMEORIGIN` en `/__/auth/*`, para que el iframe de Firebase Auth pueda incrustarse).
+
+### 6.1 Producción (Vercel) y login con Google en móvil
+
+- **Despliegue:** Vercel está conectado al repo; un push a `main` despliega a producción (`https://nutricion-app-theta.vercel.app`) y el resto de ramas generan previews. Flujo de ramas: `feature/*` → `develop` → `main` (`GIT_GUIDE.md`).
+- **Variables por entorno** (Vercel → Settings → Environment Variables; los `NEXT_PUBLIC_*` se incrustan en el build, así que cambiarlos exige un redeploy):
+  - *Production*: las 6 `NEXT_PUBLIC_FIREBASE_*` (con `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` = `nutricion-app-theta.vercel.app`), credenciales Admin (`FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` en una sola línea **o** las 3 `FIREBASE_ADMIN_*` sueltas; si están ambas gana el JSON), `GEMINI_API_KEY`, `GEMINI_MODEL`, opcional `AI_DAILY_LIMIT_PER_USER`.
+  - *Preview/Development*: igual pero con `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` = `<proyecto>.firebaseapp.com` (login por popup).
+  - **Nunca** en Vercel: `NEXT_PUBLIC_USE_FIREBASE_EMULATORS`, `FIREBASE_AUTH_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST` (activarían el modo de pruebas / Admin sin credenciales).
+- **Por qué `authDomain` = dominio de la app:** Safari, Chrome móvil y las PWA bloquean el almacenamiento de terceros; con `authDomain` = `*.firebaseapp.com`, `signInWithRedirect` vuelve sin sesión. `next.config.ts` sirve `/__/auth/*` desde nuestro propio dominio (rewrite a `https://<proyecto>.firebaseapp.com/__/auth/*`) y con `authDomain` = ese dominio todo queda en el mismo origen ([Firebase: redirect best practices](https://firebase.google.com/docs/auth/web/redirect-best-practices)).
+- **Estrategia de login** (`lib/auth-strategy.ts`): en móvil o PWA instalada se usa **redirect**, pero **solo si** `authDomain` coincide con el host de la app; si no, popup (así un authDomain mal configurado no rompe el móvil). En escritorio, popup, con fallback a redirect si el popup se bloquea. Con emuladores siempre popup/`__testSignIn`.
+- **Orden al cambiar el authDomain** (si se hace al revés, el login se rompe): (1) código con el rewrite desplegado; (2) agregar `https://nutricion-app-theta.vercel.app/__/auth/handler` en Google Cloud Console → APIs y servicios → Credenciales → cliente OAuth "Web client (auto created by Google Service)" → *URIs de redirección autorizados*; (3) cambiar `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` en Production; (4) redeploy.
+- **iOS:** la PWA instalada tiene almacenamiento separado de Safari: hay que iniciar sesión dentro de la app instalada. Los navegadores integrados (Instagram, Facebook, WebViews) no pueden usar Google OAuth; el login muestra un aviso para abrir la página en Safari/Chrome.
+- **Verificación:** `PROD_URL=https://nutricion-app-theta.vercel.app npm run test:prod` (sin sesión, sin gastar cuota de IA). Con `EXPECT_REDIRECT_LOGIN=1` también comprueba que el botón de Google redirige por el dominio propio y que Google acepta la URI de redirección.
 
 **Modelo de IA:** `gemini-3.5-flash-lite` (Flash-Lite estable vigente en oct-2026 según https://ai.google.dev/gemini-api/docs/models), vía REST `v1beta/models/{model}:generateContent`, clave en header `x-goog-api-key`. Configurable con `GEMINI_MODEL`. La cuota gratuita es por proyecto y compartida por todo el grupo; verificar límites vigentes en https://aistudio.google.com/rate-limit (Google no los publica en la documentación).
 
@@ -207,6 +224,11 @@ color usado solo para dar significado, no decoración.
 9. **Al registrar un peso más reciente** se actualiza el peso del perfil y se recalculan las metas, salvo que estén personalizadas.
 10. **Caché persistente de Firestore** (funciona sin conexión para datos ya cargados); las escrituras usan `settleWrite` para no colgarse offline. No hay service worker, así que abrir la app sin conexión y sin caché del navegador no funciona.
 11. **Colores de macros en modo oscuro** ajustados respecto a los claros para pasar la validación de contraste/daltonismo.
+12. **Login móvil por redirect con dominio propio** (oct-2026): `signInWithPopup` falla o queda bloqueado en teléfonos y PWA; se agregó `signInWithRedirect` con el handler de Firebase servido desde nuestro dominio (rewrite `/__/auth/*` + `authDomain` = dominio de Vercel). Se activa solo si `authDomain` coincide con el host (ver §6.1).
+13. **Límites ajustados a Vercel**: imagen ≤ 3 MB (Vercel rechaza cuerpos > ~4,5 MB), Gemini 22 s por intento, `maxDuration` 60 s y timeout de cliente 55 s, para que el reintento a Gemini no se corte con un 504 que no devuelve el intento de cuota.
+14. **Galería con `accept="image/*"`** (sin listar HEIC/HEIF): así iOS entrega JPEG convertido; si se listara `image/heic`, entregaría el HEIC original y Chrome/Android no sabe decodificarlo.
+15. **Credenciales Admin normalizadas** (`lib/server/service-account.ts`): el JSON de la service account pegado en Vercel suele venir con comillas, saltos de línea reales o `\n` doblemente escapado; se normaliza y los errores no incluyen secretos.
+16. **Humo contra producción sin sesión** (`tests/prod`): el login real de Google no se puede automatizar y `__testSignIn` no existe fuera de los emuladores; solo se prueba lo público (login, manifest/instalabilidad, `/__/auth/*`, 401 de la API). El flujo con sesión se prueba a mano en el teléfono.
 
 ## 10. Pendientes / ideas futuras
 
@@ -220,18 +242,20 @@ color usado solo para dar significado, no decoración.
 
 ## 11. Pasos manuales pendientes (los hace el dueño del proyecto)
 
-1. **Publicar reglas de Firestore** (las nuevas reemplazan a las de la tanda 2): `firebase login` → `firebase use --add` (elige el proyecto) → `firebase deploy --only firestore:rules`.
-2. **Storage**: si el proyecto tiene Storage activado, publicar `storage.rules` (`firebase deploy --only storage`); si no, no hacer nada.
+1. **Reglas de Firestore**: `.firebaserc` ya apunta al proyecto; `firebase deploy --only firestore:rules,firestore:indexes` (es idempotente: si ya están publicadas, lo indica).
+2. **Storage**: la app no lo usa. Si el proyecto lo tiene activado, `firebase deploy --only storage` publica `storage.rules` (deniega todo); si no, no hacer nada.
 3. **Gemini**: en Google AI Studio, confirmar que `gemini-3.5-flash-lite` está disponible para la clave y revisar los límites del plan gratuito (RPM/RPD). Recomendado: restringir la API key a "Generative Language API".
-4. **Firebase Auth**: confirmar que el proveedor Google está habilitado y agregar el dominio de producción a *Dominios autorizados*.
-5. **Desplegar** (p. ej. Vercel): cargar las variables de `.env.example` (sin `NEXT_PUBLIC_USE_FIREBASE_EMULATORS`).
-6. **Usuarios existentes** de la tanda 2: al entrar verán el onboarding una vez (su perfil no tenía `onboardingCompleted`). Es lo esperado.
-7. **Opcional**: restringir la API key web de Firebase por referer HTTP en Google Cloud Console.
-8. Revisar la rama `feature/app-completa`, hacer push y abrir PR hacia `develop` (no se hizo push ni merge).
+4. **Firebase Auth**: confirmar que el proveedor Google está habilitado y que el dominio de producción está en *Dominios autorizados*.
+5. **Google Cloud Console → Credenciales → cliente OAuth "Web client (auto created by Google Service)" → URIs de redirección autorizados**: agregar `https://nutricion-app-theta.vercel.app/__/auth/handler` (necesario para el login por redirect en móvil).
+6. **Vercel → Environment Variables (Production)**: completar las variables de §6.1 (incluida `GEMINI_MODEL`), poner `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` = `nutricion-app-theta.vercel.app` **después** de los pasos 5 y del deploy del código nuevo, y hacer un redeploy.
+7. **Usuarios existentes** de la tanda 2: al entrar verán el onboarding una vez (su perfil no tenía `onboardingCompleted`). Es lo esperado.
+8. **Opcional**: restringir la API key web de Firebase por referer HTTP en Google Cloud Console.
+9. **Prueba en el teléfono** (lista en el README, §10): login, foto real, editar porciones, guardar, totales del día e instalación de la PWA.
 
 ## 12. Cómo trabajar en el proyecto
 
-- `npm run dev` · `npm run lint` · `npm run typecheck` · `npm test` (unitarios) · `npm run test:rules` (reglas, emulador) · `npm run test:e2e` (Playwright + emuladores) · `npm run build`.
+- `npm run dev` · `npm run lint` · `npm run typecheck` · `npm test` (unitarios) · `npm run test:rules` (reglas, emulador) · `npm run test:e2e` (Playwright + emuladores) · `npm run test:prod` (humo contra `PROD_URL`, sin sesión) · `npm run build`.
+- Si un test E2E suelto falla con `auth/network-request-failed` al iniciar sesión, es una carrera de arranque: Playwright solo espera el puerto 8080 (Firestore) y el emulador de Auth (9099) puede tardar un poco más. Levantar los emuladores aparte (`firebase emulators:start --only auth,firestore --project demo-nutritrack`) y reutilizarlos.
 - E2E: `playwright.config.ts` levanta emuladores (`demo-nutritrack`) y `next dev -p 3100` con `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true`; el login usa `window.__testSignIn` (solo existe en ese modo) y `/api/analyze-meal` se intercepta para no gastar cuota.
 - Íconos PWA: editar `public/icons/icon.svg` y correr `node scripts/generate-icons.mjs`.
 - Commits: seguir `GIT_GUIDE.md` (Conventional Commits en inglés, imperativo, minúsculas).
