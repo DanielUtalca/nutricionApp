@@ -78,7 +78,7 @@ Para probar en el celular dentro de tu red: `npm run dev -- -H 0.0.0.0` y abre `
 
 | Comando | Qué prueba | Requiere |
 | --- | --- | --- |
-| `npm test` | 173 tests unitarios: cálculo de BMR/TDEE/metas, parseo y validación de la respuesta de la IA, route handler `/api/analyze-meal` (auth, validación, cuota, errores, límites de tamaño y tiempo), estrategia de login móvil, errores de la API, compresión de imágenes, credenciales Admin, base de alimentos, recetas, lista de compras, fechas, progreso | Nada |
+| `npm test` | 174 tests unitarios: cálculo de BMR/TDEE/metas, parseo y validación de la respuesta de la IA, route handler `/api/analyze-meal` (auth, validación, cuota, errores, límites de tamaño y tiempo), estrategia de login móvil, errores de la API, compresión de imágenes, credenciales Admin, carga de `firebase-admin` sin `require(esm)`, base de alimentos, recetas, lista de compras, fechas, progreso | Nada |
 | `npm run test:rules` | 15 tests de `firestore.rules` contra el emulador (aislamiento entre usuarios, validación de datos) | Java + Firebase CLI |
 | `npm run test:e2e` | 28 pruebas end-to-end con Playwright (14 flujos × modo claro y oscuro, viewport móvil 390×844) contra los emuladores | Java + Firebase CLI + `npx playwright install chromium` |
 | `PROD_URL=https://nutricion-app-theta.vercel.app npm run test:prod` | Humo contra la app **desplegada**, sin sesión y sin gastar cuota de IA: login en claro/oscuro, ruta protegida, manifest e instalabilidad, `/__/auth/*`, 401 de la API | `npx playwright install chromium` |
@@ -175,6 +175,7 @@ tests/unit · tests/rules · tests/e2e · tests/prod (humo contra producción)
 | El login con Google se cierra con error en producción | Agrega el dominio a *Dominios autorizados* en Firebase Auth |
 | `permission-denied` en consola | Publica `firestore.rules` (sección 6.1) |
 | "Esa foto no se pudo leer" / "no puede leer fotos HEIC" | Elige una foto JPG/PNG, o en el iPhone: *Ajustes → Cámara → Formatos → Más compatible* |
+| `/api/analyze-meal` responde 500 en Vercel con `ERR_REQUIRE_ESM` en los logs (`vercel logs --environment production --status-code 500`) | Una dependencia del servidor exige `require()` de un módulo ESM, que el runtime de Vercel no permite. Hoy `package.json` fija `jwks-rsa` 3 bajo `firebase-admin` con `overrides`; `npm test` lo vigila (`firebase-admin-load.test.ts`). Tras actualizar `firebase-admin`, revisa ese test |
 | "El análisis tardó demasiado" / "El servicio no está disponible" | La IA o la red tardaron más de lo esperado; reintenta, o registra con *Buscar*/*Manual* |
 
 ### Si falla el login en el móvil
