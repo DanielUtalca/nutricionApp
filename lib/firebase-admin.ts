@@ -11,6 +11,7 @@ import "server-only";
 import { initializeApp, getApps, cert, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { resolveServiceAccount } from "@/lib/server/service-account";
 
 function createAdminApp(): App {
   const existing = getApps()[0];
@@ -21,22 +22,10 @@ function createAdminApp(): App {
     return initializeApp({ projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID });
   }
 
-  // La service account key se puede proveer como JSON string completo
-  // o bien como campos individuales en las variables de entorno.
-  const serviceAccountJson = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON;
-  if (serviceAccountJson) {
-    return initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
-  }
-
-  // Fallback: campos individuales (útil para plataformas como Vercel/Railway)
-  return initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-      // Las nuevas líneas en la private key se escapan como \n en .env
-      privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    }),
-  });
+  // La service account se provee como JSON completo (FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON)
+  // o como campos individuales (útil en Vercel/Railway). resolveServiceAccount normaliza
+  // comillas, saltos de línea y \n escapados, y falla con un error que no incluye secretos.
+  return initializeApp({ credential: cert(resolveServiceAccount(process.env)) });
 }
 
 export function getAdminAuth(): Auth {
