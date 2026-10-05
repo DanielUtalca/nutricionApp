@@ -6,15 +6,30 @@
 // Botón "Continuar con Google" con la paleta de NutriTrack.
 // Si ya hay sesión activa, redirige directo a /home.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { getSignInContext, useAuth } from "@/lib/auth-context";
+import { authErrorMessage, isEmbeddedBrowser, pickSignInMethod, type SignInMethod } from "@/lib/auth-strategy";
+
+const noopSubscribe = () => () => {};
 
 export default function LoginPage() {
-  const { user, loading, signIn } = useAuth();
+  const { user, loading, redirectError, signIn } = useAuth();
   const router = useRouter();
-  const [signingIn, setSigningIn] = useState(false);
+  // Método en curso: con "redirect" la página navega a Google y vuelve recargada
+  const [signingIn, setSigningIn] = useState<SignInMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Navegadores integrados (Instagram, Facebook, WebViews…): Google rechaza el login ahí.
+  // En el servidor/hidratación es false para no desajustar el HTML.
+  const embeddedBrowser = useSyncExternalStore(
+    noopSubscribe,
+    () => {
+      const ctx = getSignInContext();
+      return isEmbeddedBrowser(ctx.userAgent, ctx.standalone);
+    },
+    () => false,
+  );
 
   // Si ya hay sesión, redirige a /home
   useEffect(() => {
@@ -23,8 +38,17 @@ export default function LoginPage() {
     }
   }, [loading, user, router]);
 
+  // Al volver con "atrás" desde Google la página se restaura de la caché con el botón bloqueado
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setSigningIn(null);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   const handleSignIn = async () => {
-    setSigningIn(true);
+    setSigningIn(pickSignInMethod(getSignInContext()));
     setError(null);
     try {
       await signIn();
@@ -32,14 +56,14 @@ export default function LoginPage() {
       // el useEffect de arriba redirigirá a /home
     } catch (err: unknown) {
       console.error("Error al iniciar sesión:", err);
-      // No mostrar error si el usuario simplemente cerró el popup
-      const firebaseError = err as { code?: string };
-      if (firebaseError.code !== "auth/popup-closed-by-user") {
-        setError("No se pudo iniciar sesión. Intenta de nuevo.");
-      }
-      setSigningIn(false);
+      // Sin mensaje si el usuario simplemente cerró el popup
+      setError(authErrorMessage((err as { code?: string })?.code));
+      setSigningIn(null);
     }
   };
+
+  // Error del login por redirect (se detecta al volver de Google) o del intento actual
+  const shownError = error ?? (redirectError ? authErrorMessage(redirectError) : null);
 
   // Mientras se resuelve el auth state, mostramos un spinner sutil
   if (loading) {
@@ -109,7 +133,7 @@ export default function LoginPage() {
         <button
           id="google-sign-in-button"
           onClick={handleSignIn}
-          disabled={signingIn}
+          disabled={signingIn !== null}
           className="w-full flex items-center justify-center gap-3 py-3.5 px-4 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer shadow-sm active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             backgroundColor: "var(--bg-surface)",
@@ -117,7 +141,7 @@ export default function LoginPage() {
             border: "1px solid var(--border-base)",
           }}
         >
-          {signingIn ? (
+          {signingIn !== null ? (
             <div
               className="w-5 h-5 rounded-full border-2 border-t-transparent animate-spin"
               style={{
@@ -145,19 +169,34 @@ export default function LoginPage() {
               />
             </svg>
           )}
-          <span>{signingIn ? "Conectando…" : "Continuar con Google"}</span>
+          <span>
+            {signingIn === "redirect" ? "Redirigiendo a Google…" : signingIn ? "Conectando…" : "Continuar con Google"}
+          </span>
         </button>
 
-        {/* Mensaje de error si falla el login */}
-        {error && (
+        {/* Aviso: Google no permite iniciar sesión desde navegadores integrados en otras apps */}
+        {embeddedBrowser && (
           <p
+            role="note"
+            className="text-xs px-3 py-2 rounded-lg w-full text-center"
+            style={{ backgroundColor: "var(--bg-subtle)", color: "var(--text-secondary)" }}
+          >
+            Estás en el navegador de otra app. Google no permite iniciar sesión aquí: abre esta página en
+            Safari o Chrome.
+          </p>
+        )}
+
+        {/* Mensaje de error si falla el login */}
+        {shownError && (
+          <p
+            role="alert"
             className="text-xs px-3 py-2 rounded-lg w-full text-center"
             style={{
               backgroundColor: "var(--color-danger-muted)",
               color: "var(--color-danger)",
             }}
           >
-            {error}
+            {shownError}
           </p>
         )}
 

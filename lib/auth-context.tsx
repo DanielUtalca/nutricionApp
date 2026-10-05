@@ -18,14 +18,22 @@ import {
 } from "react";
 import {
   onAuthStateChanged,
+  getRedirectResult,
   signInWithPopup,
+  signInWithRedirect,
   signInWithCredential,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, USE_EMULATORS } from "@/lib/firebase";
+import {
+  canFallbackToRedirect,
+  pickSignInMethod,
+  shouldFallbackToRedirect,
+  type SignInContext,
+} from "@/lib/auth-strategy";
 
 // ----- Tipos del contexto ---------------------------------------------------
 
@@ -34,7 +42,9 @@ interface AuthContextValue {
   user: FirebaseUser | null;
   /** true mientras se resuelve el estado inicial de autenticación */
   loading: boolean;
-  /** Inicia sesión con Google (popup) */
+  /** Código de error (`auth/...`) si el login por redirect falló al volver a la app */
+  redirectError: string | null;
+  /** Inicia sesión con Google (popup en escritorio, redirect en móvil/PWA) */
   signIn: () => Promise<void>;
   /** Cierra sesión */
   signOut: () => Promise<void>;
@@ -45,6 +55,21 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 // ----- Proveedor de Google --------------------------------------------------
 
 const googleProvider = new GoogleAuthProvider();
+// Permite elegir cuenta aunque el navegador ya tenga una de Google abierta
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
+/** Señales del navegador actual para elegir popup o redirect (solo en el cliente) */
+export function getSignInContext(): SignInContext {
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return {
+    userAgent: nav.userAgent,
+    maxTouchPoints: nav.maxTouchPoints,
+    standalone: window.matchMedia?.("(display-mode: standalone)").matches === true || nav.standalone === true,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    host: window.location.host,
+    emulators: USE_EMULATORS,
+  };
+}
 
 // ----- Creación del documento de usuario en Firestore -----------------------
 
@@ -91,6 +116,16 @@ async function ensureUserDocument(firebaseUser: FirebaseUser): Promise<void> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [redirectError, setRedirectError] = useState<string | null>(null);
+
+  // Al volver de Google tras `signInWithRedirect`, el SDK ya deja la sesión lista
+  // (onAuthStateChanged); esta llamada solo sirve para enterarnos si falló.
+  useEffect(() => {
+    getRedirectResult(auth).catch((err: unknown) => {
+      console.error("Error al volver del login con Google:", err);
+      setRedirectError((err as { code?: string })?.code ?? "auth/unknown");
+    });
+  }, []);
 
   // Escucha cambios de sesión (incluye el estado inicial)
   useEffect(() => {
@@ -111,7 +146,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    await signInWithPopup(auth, googleProvider);
+    setRedirectError(null);
+    const ctx = getSignInContext();
+    if (pickSignInMethod(ctx) === "redirect") {
+      // La página navega a Google; esta promesa no se resuelve en este documento
+      await signInWithRedirect(auth, googleProvider);
+      return;
+    }
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      // Popup bloqueado o sin soporte: si el proxy de mismo dominio está activo, redirect
+      if (shouldFallbackToRedirect((err as { code?: string })?.code) && canFallbackToRedirect(ctx)) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
+      throw err;
+    }
   }, []);
 
   // Solo con emuladores (pruebas E2E): login sin popup con una credencial
@@ -136,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, redirectError, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
