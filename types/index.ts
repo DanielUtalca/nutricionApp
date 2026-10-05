@@ -109,7 +109,7 @@ export interface Meal {
 }
 
 // ----- Registro de peso -------------------------------------------------------
-// Documento: users/{uid}/weightLogs/{logId}
+// Documento: users/{uid}/weightLogs/{YYYY-MM-DD} (un registro por día)
 
 export interface WeightLog {
   id: string;
@@ -120,6 +120,7 @@ export interface WeightLog {
   // Medidas corporales opcionales (en cm)
   waistCm?: number;
   hipCm?: number;
+  chestCm?: number;
   armCm?: number;
 
   notes?: string;
@@ -169,11 +170,18 @@ export interface Recipe {
 // ----- Hidratación -----------------------------------------------------------
 // Documento: users/{uid}/water/{YYYY-MM-DD}
 
+export interface WaterEntry {
+  ml: number;
+  at: Timestamp;
+}
+
 export interface WaterLog {
+  id: string;
   uid: string;
   date: string; // formato YYYY-MM-DD
-  totalLiters: number;
-  entries: { time: Timestamp; liters: number }[];
+  /** Total del día en mililitros (entero, evita errores de coma flotante) */
+  totalMl: number;
+  entries: WaterEntry[];
   updatedAt: Timestamp;
 }
 

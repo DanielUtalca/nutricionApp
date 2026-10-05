@@ -19,10 +19,11 @@ import type { Meal } from "@/types";
 import { Page, ErrorNote } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { FullScreenSpinner } from "@/components/ui/spinner";
-import { CameraIcon, ChevronLeftIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ScaleIcon } from "@/components/ui/icons";
 import { CalorieRing } from "@/components/meal/calorie-ring";
 import { MacroBar } from "@/components/meal/macro-bar";
 import { MealSection } from "@/components/meal/meal-section";
+import { WaterCard } from "@/components/progress/water-card";
 
 export default function HomePage() {
   return (
@@ -117,12 +118,31 @@ function HomeContent() {
         </div>
       </Card>
 
+      {user && <WaterCard uid={user.uid} date={date} targetL={profile.dailyWaterLTarget || 2} />}
+
       {/* Comidas del día por tipo */}
       <section aria-label="Comidas del día" className="flex flex-col gap-3">
         {MEAL_TYPES.map((type) => (
           <MealSection key={type} type={type} meals={groups[type]} date={date} />
         ))}
       </section>
+
+      {/* Seguimiento corporal */}
+      <Link
+        href="/progress"
+        className="flex items-center gap-3 rounded-2xl bg-bg-surface border border-border-subtle shadow-sm p-4 hover:bg-bg-subtle transition-colors"
+      >
+        <span className="w-9 h-9 rounded-xl bg-bg-subtle text-text-secondary flex items-center justify-center" aria-hidden>
+          <ScaleIcon size={18} />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block font-semibold leading-tight">Peso y medidas</span>
+          <span className="block text-xs text-text-secondary">
+            {profile.weightKg ? `Último: ${profile.weightKg.toLocaleString("es-CL")} kg · ver evolución` : "Registra tu peso"}
+          </span>
+        </span>
+        <ChevronRightIcon size={18} className="text-text-disabled" />
+      </Link>
 
       {/* Acceso rápido: registrar por foto */}
       <Link

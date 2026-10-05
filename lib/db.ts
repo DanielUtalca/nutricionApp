@@ -6,22 +6,27 @@
 
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
+  increment,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { DateKey } from "@/lib/dates";
 import { mealTotalsFields } from "@/lib/meals";
-import type { FoodEntry, MealSource, MealType } from "@/types";
+import type { FoodEntry, MealSource, MealType, WaterEntry } from "@/types";
 
 export const paths = {
   user: (uid: string) => `users/${uid}`,
   meals: (uid: string) => `users/${uid}/meals`,
   weightLogs: (uid: string) => `users/${uid}/weightLogs`,
+  water: (uid: string) => `users/${uid}/water`,
 };
 
 // ----- Comidas -----------------------------------------------------------------
@@ -104,5 +109,30 @@ export async function addWeightLog(uid: string, input: WeightLogInput): Promise<
     uid,
     ...input,
     createdAt: serverTimestamp(),
+  });
+}
+
+export async function deleteWeightLog(uid: string, date: DateKey): Promise<void> {
+  await deleteDoc(doc(db, paths.weightLogs(uid), date));
+}
+
+// ----- Agua --------------------------------------------------------------------
+// increment/arrayUnion funcionan sin conexión (se sincronizan al volver)
+
+export async function addWater(uid: string, date: DateKey, ml: number): Promise<void> {
+  const entry: WaterEntry = { ml, at: Timestamp.now() };
+  await setDoc(
+    doc(db, paths.water(uid), date),
+    { uid, date, totalMl: increment(ml), entries: arrayUnion(entry), updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+/** Deshace un registro de agua concreto (normalmente el último) */
+export async function removeWaterEntry(uid: string, date: DateKey, entry: WaterEntry): Promise<void> {
+  await updateDoc(doc(db, paths.water(uid), date), {
+    totalMl: increment(-entry.ml),
+    entries: arrayRemove(entry),
+    updatedAt: serverTimestamp(),
   });
 }
