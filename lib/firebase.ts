@@ -4,9 +4,16 @@
 // Variables de entorno requeridas (ver .env.example)
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
-import { getAuth, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
-import { getStorage, FirebaseStorage } from "firebase/storage";
+import { getAuth, connectAuthEmulator, Auth } from "firebase/auth";
+import {
+  initializeFirestore,
+  getFirestore,
+  connectFirestoreEmulator,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+  Firestore,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,11 +24,31 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+/** Solo para pruebas locales/E2E: conecta a los emuladores de Firebase */
+export const USE_EMULATORS = process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === "true";
+
+const isFirstInit = getApps().length === 0;
+
 // Evita reinicializar si ya existe una instancia (hot reload en dev)
-const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app: FirebaseApp = isFirstInit ? initializeApp(firebaseConfig) : getApp();
 
 const auth: Auth = getAuth(app);
-const db: Firestore = getFirestore(app);
-const storage: FirebaseStorage = getStorage(app);
 
-export { app, auth, db, storage };
+// Caché persistente (IndexedDB) en el navegador: la app abre rápido y
+// funciona sin conexión; en el servidor (prerender) usamos memoria.
+const db: Firestore = isFirstInit
+  ? initializeFirestore(app, {
+      ignoreUndefinedProperties: true,
+      localCache:
+        typeof window !== "undefined" && !USE_EMULATORS
+          ? persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+          : memoryLocalCache(),
+    })
+  : getFirestore(app);
+
+if (USE_EMULATORS && isFirstInit && typeof window !== "undefined") {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+}
+
+export { app, auth, db };

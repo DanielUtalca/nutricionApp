@@ -47,8 +47,18 @@ export interface User {
   dailyCarbsGTarget: number;
   dailyFatGTarget: number;
 
+  // Resultado del último cálculo (informativo, se muestra en el perfil)
+  bmr?: number;
+  tdee?: number;
+  activityMultiplier?: number;
+  /** true si el usuario editó las metas a mano (no se pisan al recalcular sin avisar) */
+  goalsCustomized?: boolean;
+
   // Hidratación
   dailyWaterLTarget: number;
+
+  /** true cuando terminó el onboarding */
+  onboardingCompleted?: boolean;
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
