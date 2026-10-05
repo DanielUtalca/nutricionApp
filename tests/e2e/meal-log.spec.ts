@@ -78,6 +78,28 @@ test("errores de cuota de la IA muestran mensaje claro y alternativas", async ({
   await expect(page.getByLabel("Buscar alimento")).toBeVisible();
 });
 
+test("errores de plataforma sin JSON (Vercel 504/413 en HTML) muestran mensajes claros", async ({ page }, testInfo) => {
+  await newUserAtHome(page, testInfo);
+  let status = 504;
+  await page.route("**/api/analyze-meal", (route) =>
+    route.fulfill({ status, contentType: "text/html", body: "<html><body>An error occurred</body></html>" }),
+  );
+  await page.goto("/log?mode=photo");
+  await page.getByTestId("photo-input").setInputFiles(PHOTO);
+  await page.getByRole("button", { name: /Analizar con IA/ }).click();
+
+  // 504: la IA tardó demasiado → mensaje claro y alternativas manuales
+  await expect(page.getByText("El análisis tardó demasiado")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ingresar a mano" })).toBeVisible();
+
+  // 413: foto demasiado pesada → pide otra foto, sin alternativas de IA caída
+  status = 413;
+  await page.getByRole("button", { name: /Analizar con IA/ }).click();
+  await expect(page.getByText(/La foto es demasiado pesada/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ingresar a mano" })).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+});
+
 test("búsqueda por texto y registro manual; editar y borrar comida", async ({ page }, testInfo) => {
   await newUserAtHome(page, testInfo);
   await page.getByRole("link", { name: "Agregar a Desayuno" }).click();
