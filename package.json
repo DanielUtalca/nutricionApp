@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-nutritrack \"vitest run -c vitest.rules.config.mts\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-nutritrack \"vitest run -c vitest.rules.config.mts\"",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "firebase": "^12.19.0",

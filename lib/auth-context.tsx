@@ -19,6 +19,7 @@ import {
 import {
   onAuthStateChanged,
   signInWithPopup,
+  signInWithCredential,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   type User as FirebaseUser,
@@ -111,6 +112,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async () => {
     await signInWithPopup(auth, googleProvider);
+  }, []);
+
+  // Solo con emuladores (pruebas E2E): login sin popup con una credencial
+  // de Google falsa que el emulador de Auth acepta. No existe en producción.
+  useEffect(() => {
+    // Condición literal para que el build de producción elimine este bloque
+    if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS !== "true") return;
+    const w = window as unknown as { __testSignIn?: (email: string, name?: string) => Promise<void> };
+    w.__testSignIn = async (email, name = "Usuario Prueba") => {
+      const credential = GoogleAuthProvider.credential(
+        JSON.stringify({ sub: email, email, email_verified: true, name }),
+      );
+      await signInWithCredential(auth, credential);
+    };
+    return () => {
+      delete w.__testSignIn;
+    };
   }, []);
 
   const signOut = useCallback(async () => {
