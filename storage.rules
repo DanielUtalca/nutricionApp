@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// ============================================================
+// Reglas de Firebase Storage — NutriTrack
+// ============================================================
+// La app NO usa Storage: las fotos de comida se envían directo a
+// /api/analyze-meal y se descartan tras el análisis. Por eso se deniega
+// todo acceso. Si en el futuro se guardan miniaturas, abrir solo
+// users/{uid}/... para su dueño, con límite de tamaño y tipo de imagen.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
