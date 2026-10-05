@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { analyzeMealPhoto, ApiError, type AnalyzeResponse } from "@/lib/api-client";
+import { suggestsManualFallback } from "@/lib/api-errors";
 import { compressImage, ImageCompressError } from "@/lib/image-compress";
 import { MAX_HINT_LENGTH } from "@/lib/ai/image";
 import { Button } from "@/components/ui/button";
@@ -26,12 +27,28 @@ export function PhotoPanel({
   const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
   const [hint, setHint] = useState("");
   const [status, setStatus] = useState<"idle" | "compressing" | "analyzing">("idle");
-  const [error, setError] = useState<{ message: string; quota?: boolean } | null>(null);
+  const [error, setError] = useState<{ message: string; fallback?: boolean } | null>(null);
+
+  // Si el usuario cambia de pestaña mientras la IA responde, el resultado ya no se usa
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // Libera el object URL al cambiar de foto o salir
   useEffect(() => () => {
     if (photo) URL.revokeObjectURL(photo.url);
   }, [photo]);
+
+  // Vaciar el input tras elegir permite volver a escoger el mismo archivo (p. ej. tras un error)
+  const onPick = (input: HTMLInputElement) => {
+    const file = input.files?.[0];
+    input.value = "";
+    void onFile(file);
+  };
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
@@ -52,17 +69,18 @@ export function PhotoPanel({
     setError(null);
     setStatus("analyzing");
     try {
-      onResult(await analyzeMealPhoto(photo.blob, hint));
+      const res = await analyzeMealPhoto(photo.blob, hint);
+      if (mounted.current) onResult(res);
     } catch (err) {
+      if (!mounted.current) return;
       const apiErr = err instanceof ApiError ? err : null;
-      const quota = apiErr?.status === 429 || apiErr?.code === "not_configured";
       let message = apiErr?.message ?? "No se pudo analizar la foto. Intenta de nuevo.";
       if (apiErr?.code === "rate_limited" && apiErr.retryAfterSeconds) {
         message = `${message} (${apiErr.retryAfterSeconds} s)`;
       }
-      setError({ message, quota });
+      setError({ message, fallback: apiErr ? suggestsManualFallback(apiErr.code, apiErr.status) : true });
     } finally {
-      setStatus("idle");
+      if (mounted.current) setStatus("idle");
     }
   };
 
@@ -84,17 +102,19 @@ export function PhotoPanel({
         className="sr-only"
         tabIndex={-1}
         aria-hidden
-        onChange={(e) => onFile(e.target.files?.[0])}
+        onChange={(e) => onPick(e.target)}
       />
+      {/* Solo "image/*": si se listan image/heic o image/heif, iOS entrega el HEIC original
+          en vez de convertirlo a JPEG, y Chrome/Android no sabe leerlo */}
       <input
         ref={galleryRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+        accept="image/*"
         className="sr-only"
         tabIndex={-1}
         aria-label="Elegir foto de la galería"
         data-testid="photo-input"
-        onChange={(e) => onFile(e.target.files?.[0])}
+        onChange={(e) => onPick(e.target)}
       />
 
       {!photo ? (
@@ -161,7 +181,7 @@ export function PhotoPanel({
       {error && (
         <div role="alert" className="rounded-2xl bg-danger-muted text-danger p-4 flex flex-col gap-3">
           <p className="text-sm">{error.message}</p>
-          {error.quota && (
+          {error.fallback && (
             <div className="flex gap-2">
               <Button size="sm" variant="secondary" onClick={() => onFallback("search")}>
                 Buscar alimento
