@@ -3,6 +3,8 @@ import type { MetadataRoute } from "next";
 // Manifest de la PWA: permite "Agregar a pantalla de inicio" desde el navegador
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    // Identidad estable de la app instalada (aunque cambie start_url en el futuro)
+    id: "/",
     name: "NutriTrack — Tu dieta, sin suscripciones",
     short_name: "NutriTrack",
     description: "Registra comidas por foto con IA y sigue tus calorías y macros.",

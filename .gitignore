@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# claves de service account descargadas por error en la carpeta del proyecto
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
