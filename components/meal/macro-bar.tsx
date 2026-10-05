@@ -70,7 +70,7 @@ export function MacroInline({
     ["fat", fatG],
   ];
   return (
-    <span className={cn("inline-flex items-center gap-2.5 text-xs text-text-secondary tabular", className)}>
+    <span className={cn("inline-flex items-center gap-2.5 text-xs text-text-secondary tabular whitespace-nowrap shrink-0", className)}>
       {items.map(([key, value]) => (
         <span key={key} className="inline-flex items-center gap-1" title={MACROS[key].label}>
           <span aria-hidden className={cn("w-1.5 h-1.5 shrink-0 rounded-full", MACROS[key].bgClass)} />

@@ -130,14 +130,8 @@ export interface WeightLog {
 // ----- Receta guardada -------------------------------------------------------
 // Documento: users/{uid}/recipes/{recipeId}
 
-export interface RecipeIngredient {
-  name: string;
-  quantity: string; // ej: "200g", "2 unidades"
-  calories: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-}
+// Un ingrediente es un FoodEntry: nombre, porción (texto + gramos) y macros
+export type RecipeIngredient = FoodEntry;
 
 export interface Recipe {
   id: string;
@@ -160,10 +154,51 @@ export interface Recipe {
   totalCarbsG: number;
   totalFatG: number;
 
-  photoURL?: string;
   tags?: string[]; // ej: ["almuerzo", "alto en proteína"]
+  /** id de la receta sugerida de la que se copió (si aplica) */
+  suggestedId?: string;
 
   createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// ----- Plan de comidas --------------------------------------------------------
+// Documento: users/{uid}/mealPlans/{YYYY-MM-DD}
+
+export interface MealPlanItem {
+  id: string;
+  mealType: MealType;
+  recipeId: string;
+  /** Copia del nombre y macros por porción, para mostrar sin leer la receta */
+  recipeName: string;
+  servings: number;
+  caloriesPerServing: number;
+  proteinGPerServing: number;
+  carbsGPerServing: number;
+  fatGPerServing: number;
+  /** true cuando ya se registró como comida ese día */
+  logged?: boolean;
+}
+
+export interface MealPlanDay {
+  id: string;
+  uid: string;
+  date: string;
+  items: MealPlanItem[];
+  updatedAt: Timestamp;
+}
+
+// ----- Lista de compras ---------------------------------------------------------
+// Documento: users/{uid}/shoppingLists/{YYYY-MM-DD del lunes}
+
+export interface ShoppingListDoc {
+  id: string;
+  uid: string;
+  weekStart: string;
+  /** Claves de ítems generados que ya se compraron */
+  checked: string[];
+  /** Ítems agregados a mano */
+  extras: { id: string; name: string; checked: boolean }[];
   updatedAt: Timestamp;
 }
 

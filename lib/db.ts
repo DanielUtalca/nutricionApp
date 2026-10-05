@@ -20,13 +20,17 @@ import {
 import { db } from "@/lib/firebase";
 import type { DateKey } from "@/lib/dates";
 import { mealTotalsFields } from "@/lib/meals";
-import type { FoodEntry, MealSource, MealType, WaterEntry } from "@/types";
+import { computeRecipeTotals } from "@/lib/recipes";
+import type { FoodEntry, MealPlanItem, MealSource, MealType, ShoppingListDoc, WaterEntry } from "@/types";
 
 export const paths = {
   user: (uid: string) => `users/${uid}`,
   meals: (uid: string) => `users/${uid}/meals`,
   weightLogs: (uid: string) => `users/${uid}/weightLogs`,
   water: (uid: string) => `users/${uid}/water`,
+  recipes: (uid: string) => `users/${uid}/recipes`,
+  mealPlans: (uid: string) => `users/${uid}/mealPlans`,
+  shoppingLists: (uid: string) => `users/${uid}/shoppingLists`,
 };
 
 // ----- Comidas -----------------------------------------------------------------
@@ -41,7 +45,7 @@ export interface MealInput {
 }
 
 /** Normaliza alimentos antes de guardar (sin campos vacíos ni negativos) */
-function cleanFoods(foods: FoodEntry[]): FoodEntry[] {
+export function cleanFoods(foods: FoodEntry[]): FoodEntry[] {
   const nonNeg = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
   return foods.map((f) => ({
     name: f.name.trim().slice(0, 120) || "Alimento",
@@ -133,6 +137,78 @@ export async function removeWaterEntry(uid: string, date: DateKey, entry: WaterE
   await updateDoc(doc(db, paths.water(uid), date), {
     totalMl: increment(-entry.ml),
     entries: arrayRemove(entry),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// ----- Recetas ---------------------------------------------------------------
+
+export interface RecipeInput {
+  name: string;
+  description?: string;
+  servings: number;
+  ingredients: FoodEntry[];
+  tags?: string[];
+  suggestedId?: string;
+}
+
+function recipeFields(input: RecipeInput) {
+  const ingredients = cleanFoods(input.ingredients);
+  const servings = Math.min(Math.max(Math.round(input.servings * 4) / 4, 0.25), 50);
+  return {
+    name: input.name.trim().slice(0, 120) || "Receta",
+    description: input.description?.trim().slice(0, 1000) ?? "",
+    servings,
+    ingredients,
+    tags: (input.tags ?? []).map((t) => t.trim().slice(0, 30)).filter(Boolean).slice(0, 8),
+    ...(input.suggestedId ? { suggestedId: input.suggestedId } : {}),
+    ...computeRecipeTotals(ingredients, servings),
+  };
+}
+
+export async function addRecipe(uid: string, input: RecipeInput): Promise<string> {
+  const ref = await addDoc(collection(db, paths.recipes(uid)), {
+    uid,
+    ...recipeFields(input),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function updateRecipe(uid: string, recipeId: string, input: RecipeInput): Promise<void> {
+  await updateDoc(doc(db, paths.recipes(uid), recipeId), { ...recipeFields(input), updatedAt: serverTimestamp() });
+}
+
+export async function deleteRecipe(uid: string, recipeId: string): Promise<void> {
+  await deleteDoc(doc(db, paths.recipes(uid), recipeId));
+}
+
+// ----- Plan de comidas ---------------------------------------------------------
+// Un documento por día con la lista completa de ítems (se reescribe entera:
+// es de un solo usuario, así que "última escritura gana" es suficiente).
+
+export async function savePlanItems(uid: string, date: DateKey, items: MealPlanItem[]): Promise<void> {
+  await setDoc(doc(db, paths.mealPlans(uid), date), {
+    uid,
+    date,
+    items: items.slice(0, 40),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// ----- Lista de compras ----------------------------------------------------------
+
+export async function saveShoppingList(
+  uid: string,
+  weekStart: DateKey,
+  data: Pick<ShoppingListDoc, "checked" | "extras">,
+): Promise<void> {
+  await setDoc(doc(db, paths.shoppingLists(uid), weekStart), {
+    uid,
+    weekStart,
+    checked: data.checked.slice(0, 300),
+    extras: data.extras.slice(0, 100).map((e) => ({ ...e, name: e.name.trim().slice(0, 80) })),
     updatedAt: serverTimestamp(),
   });
 }
