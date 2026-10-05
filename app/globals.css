@@ -30,11 +30,11 @@
 
   /* Macros — colores fijos y consistentes en toda la app */
   --color-protein: #3b82f6;        /* azul — proteína */
-  --color-protein-muted: #eff6ff;
+  --color-protein-muted: #e6effd;
   --color-carbs: #f59e0b;          /* ámbar/naranja — carbohidratos */
-  --color-carbs-muted: #fffbeb;
+  --color-carbs-muted: #fdf1d9;
   --color-fat: #a855f7;            /* morado — grasa */
-  --color-fat-muted: #faf5ff;
+  --color-fat-muted: #f3e8fd;
 
   /* Estado: exceso de meta */
   --color-danger: #e03131;
@@ -69,12 +69,12 @@
     --color-water: #38bdf8;
     --color-water-muted: #0c2a3a;
 
-    --color-protein: #60a5fa;
-    --color-protein-muted: #172554;
-    --color-carbs: #fbbf24;
-    --color-carbs-muted: #2b2112;
-    --color-fat: #c084fc;
-    --color-fat-muted: #2e1065;
+    --color-protein: #4f8ff7;
+    --color-protein-muted: #1d2635;
+    --color-carbs: #d97706;
+    --color-carbs-muted: #2c2418;
+    --color-fat: #b06cf8;
+    --color-fat-muted: #2a2236;
 
     --color-danger: #ff8787;
     --color-danger-muted: #3b0f0f;

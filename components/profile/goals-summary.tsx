@@ -26,9 +26,12 @@ export function GoalsSummary({
 
       <div className="grid grid-cols-3 gap-2">
         {MACRO_KEYS.map((key) => (
-          <div key={key} className={cn("rounded-xl p-3 text-center", MACROS[key].mutedBgClass)}>
-            <p className={cn("text-xl font-bold tabular", MACROS[key].textClass)}>{grams[key]} g</p>
-            <p className="text-xs text-text-secondary">{MACROS[key].label}</p>
+          <div key={key} className="rounded-xl p-3 text-center bg-bg-subtle">
+            <p className="text-xl font-bold">{grams[key]} g</p>
+            <p className="flex items-center justify-center gap-1.5 text-xs text-text-secondary">
+              <span aria-hidden className={cn("w-2 h-2 shrink-0 rounded-full", MACROS[key].bgClass)} />
+              {MACROS[key].label}
+            </p>
           </div>
         ))}
       </div>

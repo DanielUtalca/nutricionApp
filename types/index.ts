@@ -15,6 +15,8 @@ export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 export type Sex = "male" | "female";
 
+export type MealSource = "ai_photo" | "ai_text" | "manual" | "text_search" | "recipe";
+
 // ----- Actividad física detallada ------------------------------------------
 
 export interface ActivityEntry {
@@ -92,11 +94,15 @@ export interface Meal {
   totalCarbsG: number;
   totalFatG: number;
 
-  // Foto (URL temporal en Storage; se borra tras análisis exitoso de IA)
-  photoURL?: string;
+  // Nombre corto para mostrar (ej. "Arroz con pollo"); si falta se usan los alimentos
+  title?: string;
 
-  // Indica si fue registrada por foto IA o manual
-  source: "ai_photo" | "manual" | "text_search";
+  // Origen del registro. La foto NO se guarda: se envía directo a la IA
+  // y solo persisten los datos nutricionales resultantes.
+  source: MealSource;
+
+  /** Confianza reportada por la IA (solo source = ai_photo | ai_text) */
+  aiConfidence?: "high" | "medium" | "low";
 
   createdAt: Timestamp;
   updatedAt: Timestamp;

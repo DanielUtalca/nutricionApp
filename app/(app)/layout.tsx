@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ProfileProvider, useProfile } from "@/lib/profile-context";
 import { isProfileComplete } from "@/lib/profile";
 import { FullScreenSpinner } from "@/components/ui/spinner";
+import { BottomNav, showsBottomNav } from "@/components/nav/bottom-nav";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,5 +49,10 @@ function OnboardingGate({ children }: { children: ReactNode }) {
 
   if (loading || (!complete && !onOnboarding)) return <FullScreenSpinner />;
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {showsBottomNav(pathname) && <BottomNav />}
+    </>
+  );
 }
