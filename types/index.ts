@@ -15,6 +15,8 @@ export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 export type Sex = "male" | "female";
 
+export type MealSource = "ai_photo" | "ai_text" | "manual" | "text_search" | "recipe";
+
 // ----- Actividad física detallada ------------------------------------------
 
 export interface ActivityEntry {
@@ -47,8 +49,18 @@ export interface User {
   dailyCarbsGTarget: number;
   dailyFatGTarget: number;
 
+  // Resultado del último cálculo (informativo, se muestra en el perfil)
+  bmr?: number;
+  tdee?: number;
+  activityMultiplier?: number;
+  /** true si el usuario editó las metas a mano (no se pisan al recalcular sin avisar) */
+  goalsCustomized?: boolean;
+
   // Hidratación
   dailyWaterLTarget: number;
+
+  /** true cuando terminó el onboarding */
+  onboardingCompleted?: boolean;
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -82,18 +94,22 @@ export interface Meal {
   totalCarbsG: number;
   totalFatG: number;
 
-  // Foto (URL temporal en Storage; se borra tras análisis exitoso de IA)
-  photoURL?: string;
+  // Nombre corto para mostrar (ej. "Arroz con pollo"); si falta se usan los alimentos
+  title?: string;
 
-  // Indica si fue registrada por foto IA o manual
-  source: "ai_photo" | "manual" | "text_search";
+  // Origen del registro. La foto NO se guarda: se envía directo a la IA
+  // y solo persisten los datos nutricionales resultantes.
+  source: MealSource;
+
+  /** Confianza reportada por la IA (solo source = ai_photo | ai_text) */
+  aiConfidence?: "high" | "medium" | "low";
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
 // ----- Registro de peso -------------------------------------------------------
-// Documento: users/{uid}/weightLogs/{logId}
+// Documento: users/{uid}/weightLogs/{YYYY-MM-DD} (un registro por día)
 
 export interface WeightLog {
   id: string;
@@ -104,6 +120,7 @@ export interface WeightLog {
   // Medidas corporales opcionales (en cm)
   waistCm?: number;
   hipCm?: number;
+  chestCm?: number;
   armCm?: number;
 
   notes?: string;
@@ -113,14 +130,8 @@ export interface WeightLog {
 // ----- Receta guardada -------------------------------------------------------
 // Documento: users/{uid}/recipes/{recipeId}
 
-export interface RecipeIngredient {
-  name: string;
-  quantity: string; // ej: "200g", "2 unidades"
-  calories: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-}
+// Un ingrediente es un FoodEntry: nombre, porción (texto + gramos) y macros
+export type RecipeIngredient = FoodEntry;
 
 export interface Recipe {
   id: string;
@@ -143,21 +154,69 @@ export interface Recipe {
   totalCarbsG: number;
   totalFatG: number;
 
-  photoURL?: string;
   tags?: string[]; // ej: ["almuerzo", "alto en proteína"]
+  /** id de la receta sugerida de la que se copió (si aplica) */
+  suggestedId?: string;
 
   createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// ----- Plan de comidas --------------------------------------------------------
+// Documento: users/{uid}/mealPlans/{YYYY-MM-DD}
+
+export interface MealPlanItem {
+  id: string;
+  mealType: MealType;
+  recipeId: string;
+  /** Copia del nombre y macros por porción, para mostrar sin leer la receta */
+  recipeName: string;
+  servings: number;
+  caloriesPerServing: number;
+  proteinGPerServing: number;
+  carbsGPerServing: number;
+  fatGPerServing: number;
+  /** true cuando ya se registró como comida ese día */
+  logged?: boolean;
+}
+
+export interface MealPlanDay {
+  id: string;
+  uid: string;
+  date: string;
+  items: MealPlanItem[];
+  updatedAt: Timestamp;
+}
+
+// ----- Lista de compras ---------------------------------------------------------
+// Documento: users/{uid}/shoppingLists/{YYYY-MM-DD del lunes}
+
+export interface ShoppingListDoc {
+  id: string;
+  uid: string;
+  weekStart: string;
+  /** Claves de ítems generados que ya se compraron */
+  checked: string[];
+  /** Ítems agregados a mano */
+  extras: { id: string; name: string; checked: boolean }[];
   updatedAt: Timestamp;
 }
 
 // ----- Hidratación -----------------------------------------------------------
 // Documento: users/{uid}/water/{YYYY-MM-DD}
 
+export interface WaterEntry {
+  ml: number;
+  at: Timestamp;
+}
+
 export interface WaterLog {
+  id: string;
   uid: string;
   date: string; // formato YYYY-MM-DD
-  totalLiters: number;
-  entries: { time: Timestamp; liters: number }[];
+  /** Total del día en mililitros (entero, evita errores de coma flotante) */
+  totalMl: number;
+  entries: WaterEntry[];
   updatedAt: Timestamp;
 }
 

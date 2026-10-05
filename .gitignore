@@ -37,6 +37,24 @@ yarn-error.log*
 # vercel
 .vercel
 
+# claves de service account descargadas por error en la carpeta del proyecto
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# firebase emulators
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.firebase/
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/test-results-prod/
+/playwright-report-prod/
