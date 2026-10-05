@@ -11,7 +11,8 @@ import { where } from "firebase/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { useProfile } from "@/lib/profile-context";
 import { useCollection } from "@/lib/hooks";
-import { addMeal, paths, savePlanItems } from "@/lib/db";
+import { addMeal, addPlanItem, paths, savePlanItems } from "@/lib/db";
+import { settleWrite } from "@/lib/offline";
 import {
   addDays,
   formatDayLabel,
@@ -79,17 +80,20 @@ function PlanContent() {
     if (!user) return;
     setActionError(null);
     try {
-      await savePlanItems(user.uid, day, next);
+      await settleWrite(savePlanItems(user.uid, day, next));
     } catch (err) {
       console.error(err);
       setActionError("No se pudo actualizar el plan.");
     }
   };
 
-  const addRecipe = (recipe: Recipe, mealType: MealType) =>
-    save([
-      ...items,
-      {
+  // arrayUnion: seguro aunque el día aún no haya cargado (no pisa ítems)
+  const addRecipe = async (recipe: Recipe, mealType: MealType) => {
+    if (!user) return;
+    setActionError(null);
+    try {
+      await settleWrite(
+        addPlanItem(user.uid, day, {
         id: newId(),
         mealType,
         recipeId: recipe.id,
@@ -99,20 +103,27 @@ function PlanContent() {
         proteinGPerServing: recipe.proteinGPerServing,
         carbsGPerServing: recipe.carbsGPerServing,
         fatGPerServing: recipe.fatGPerServing,
-      },
-    ]);
+        }),
+      );
+    } catch (err) {
+      console.error(err);
+      setActionError("No se pudo actualizar el plan.");
+    }
+  };
 
   const logItem = async (item: MealPlanItem) => {
     if (!user) return;
     setBusy(item.id);
     try {
-      await addMeal(user.uid, {
-        date: day,
-        type: item.mealType,
-        foods: [recipeToFoodEntry({ name: item.recipeName, ...item }, item.servings)],
-        source: "recipe",
-        title: item.recipeName,
-      });
+      await settleWrite(
+        addMeal(user.uid, {
+          date: day,
+          type: item.mealType,
+          foods: [recipeToFoodEntry({ name: item.recipeName, ...item }, item.servings)],
+          source: "recipe",
+          title: item.recipeName,
+        }),
+      );
       await save(items.map((it) => (it.id === item.id ? { ...it, logged: true } : it)));
     } catch (err) {
       console.error(err);

@@ -109,3 +109,16 @@ test("búsqueda por texto y registro manual; editar y borrar comida", async ({ p
   await page.getByRole("button", { name: "Sí, borrar" }).click();
   await expect(page.getByTestId("calories-consumed")).toHaveText("0");
 });
+
+test("sin conexión a Firestore: guardar una comida no se cuelga y queda registrada localmente", async ({ page }, testInfo) => {
+  await newUserAtHome(page, testInfo);
+  await page.goto("/log?mode=manual&type=dinner");
+  await page.getByLabel("Alimento").fill("Sopa");
+  await page.getByLabel("Calorías").fill("180");
+  await page.getByRole("button", { name: "Agregar alimento" }).click();
+  // Cortamos solo Firestore: el servidor nunca confirma la escritura
+  await page.route("**://127.0.0.1:8080/**", (route) => route.abort("internetdisconnected"));
+  await page.getByRole("button", { name: "Guardar comida" }).click();
+  await expect(page.getByTestId("meal-section-dinner")).toContainText("180 kcal", { timeout: 15_000 });
+  await page.unroute("**://127.0.0.1:8080/**");
+});

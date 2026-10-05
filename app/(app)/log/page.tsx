@@ -10,6 +10,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { addMeal } from "@/lib/db";
+import { settleWrite } from "@/lib/offline";
 import { formatDayLabel, isDateKey, todayKey } from "@/lib/dates";
 import { isMealType, suggestMealType, sumFoods } from "@/lib/meals";
 import { formatInt } from "@/lib/macros";
@@ -95,14 +96,17 @@ function LogContent() {
     setError(null);
     try {
       const source = mealSourceFromDraft(items);
-      await addMeal(user.uid, {
-        date,
-        type: mealType,
-        foods: items.map((i) => i.food),
-        source,
-        title: title.trim() || undefined,
-        aiConfidence: source === "ai_photo" || source === "ai_text" ? ai?.confidence : undefined,
-      });
+      // Sin conexión queda en cola local y se sincroniza después (no se cuelga)
+      await settleWrite(
+        addMeal(user.uid, {
+          date,
+          type: mealType,
+          foods: items.map((i) => i.food),
+          source,
+          title: title.trim() || undefined,
+          aiConfidence: source === "ai_photo" || source === "ai_text" ? ai?.confidence : undefined,
+        }),
+      );
       router.replace(date === todayKey() ? "/home" : `/home?date=${date}`);
     } catch (err) {
       console.error("Error guardando comida:", err);

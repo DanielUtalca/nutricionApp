@@ -67,101 +67,105 @@ export function RecipeEditor({
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
-      <Field label="Nombre" placeholder="Ej: Pollo al horno con papas" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">
-          Preparación <span className="font-normal text-text-secondary">(opcional)</span>
-        </span>
-        <textarea
-          className={cn(inputClasses, "h-auto min-h-24 py-3 resize-y")}
-          value={description}
-          maxLength={1000}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Pasos, tiempos, tips…"
-        />
-      </label>
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">Rinde</span>
-        <Stepper
-          label="porciones"
-          value={servings}
-          min={1}
-          max={20}
-          onChange={setServings}
-          format={(v) => `${v} ${v === 1 ? "porción" : "porciones"}`}
-        />
-      </div>
-      <Field
-        label="Etiquetas"
-        placeholder="almuerzo, alto en proteína"
-        hint="Separadas por coma"
-        value={tags}
-        onChange={(e) => setTags(e.target.value)}
-      />
-
-      <div className="flex flex-col gap-3">
-        <SectionTitle
-          action={
-            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
-              <PlusIcon size={16} /> Ingrediente
-            </Button>
-          }
-        >
-          Ingredientes (receta completa)
-        </SectionTitle>
-        {items.length === 0 ? (
-          <p className="text-sm text-text-secondary text-center py-6 rounded-2xl border border-dashed border-border">
-            Aún no hay ingredientes.
-          </p>
-        ) : (
-          <FoodEditorList items={items} onChange={setItems} />
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-bg-subtle px-4 py-3 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs text-text-secondary">Por porción</p>
-          <p className="text-xl font-bold tabular" data-testid="recipe-kcal-serving">
-            {formatInt(totals.caloriesPerServing)} <span className="text-sm font-normal text-text-secondary">kcal</span>
-          </p>
-        </div>
-        <MacroInline proteinG={totals.proteinGPerServing} carbsG={totals.carbsGPerServing} fatG={totals.fatGPerServing} />
-      </div>
-
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <Button type="submit" size="lg" fullWidth loading={saving}>
-        {submitLabel}
-      </Button>
-
-      <Sheet open={adding} onClose={() => setAdding(false)} title="Agregar ingrediente">
-        <div className="flex flex-col gap-4">
-          <Segmented
-            ariaLabel="Origen del ingrediente"
-            value={addTab}
-            onChange={setAddTab}
-            options={[
-              { value: "search", label: "Buscar" },
-              { value: "manual", label: "Manual" },
-            ]}
+    <>
+      <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+        <Field label="Nombre" placeholder="Ej: Pollo al horno con papas" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium">
+            Preparación <span className="font-normal text-text-secondary">(opcional)</span>
+          </span>
+          <textarea
+            className={cn(inputClasses, "h-auto min-h-24 py-3 resize-y")}
+            value={description}
+            maxLength={1000}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Pasos, tiempos, tips…"
           />
-          {addTab === "search" ? (
-            <SearchPanel onAdd={(f) => setItems((prev) => [...prev, makeDraft(f, "text_search")])} />
+        </label>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium">Rinde</span>
+          <Stepper
+            label="porciones"
+            value={servings}
+            min={1}
+            max={20}
+            onChange={setServings}
+            format={(v) => `${v} ${v === 1 ? "porción" : "porciones"}`}
+          />
+        </div>
+        <Field
+          label="Etiquetas"
+          placeholder="almuerzo, alto en proteína"
+          hint="Separadas por coma"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+        />
+
+        <div className="flex flex-col gap-3">
+          <SectionTitle
+            action={
+              <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+                <PlusIcon size={16} /> Ingrediente
+              </Button>
+            }
+          >
+            Ingredientes (receta completa)
+          </SectionTitle>
+          {items.length === 0 ? (
+            <p className="text-sm text-text-secondary text-center py-6 rounded-2xl border border-dashed border-border">
+              Aún no hay ingredientes.
+            </p>
           ) : (
-            <ManualPanel
-              onAdd={(f) => {
-                setItems((prev) => [...prev, makeDraft(f, "manual")]);
-                setAdding(false);
-              }}
-            />
-          )}
-          {addTab === "search" && (
-            <Button variant="secondary" onClick={() => setAdding(false)}>
-              Listo
-            </Button>
+            <FoodEditorList items={items} onChange={setItems} />
           )}
         </div>
+
+        <div className="rounded-2xl bg-bg-subtle px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs text-text-secondary">Por porción</p>
+            <p className="text-xl font-bold tabular" data-testid="recipe-kcal-serving">
+              {formatInt(totals.caloriesPerServing)} <span className="text-sm font-normal text-text-secondary">kcal</span>
+            </p>
+          </div>
+          <MacroInline proteinG={totals.proteinGPerServing} carbsG={totals.carbsGPerServing} fatG={totals.fatGPerServing} />
+        </div>
+
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <Button type="submit" size="lg" fullWidth loading={saving}>
+          {submitLabel}
+        </Button>
+      </form>
+
+      {/* Fuera del <form>: el panel manual tiene su propio formulario y el
+          submit no debe propagarse al de la receta (ni Enter en la búsqueda) */}
+      <Sheet open={adding} onClose={() => setAdding(false)} title="Agregar ingrediente">
+          <div className="flex flex-col gap-4">
+            <Segmented
+              ariaLabel="Origen del ingrediente"
+              value={addTab}
+              onChange={setAddTab}
+              options={[
+                { value: "search", label: "Buscar" },
+                { value: "manual", label: "Manual" },
+              ]}
+            />
+            {addTab === "search" ? (
+              <SearchPanel onAdd={(f) => setItems((prev) => [...prev, makeDraft(f, "text_search")])} />
+            ) : (
+              <ManualPanel
+                onAdd={(f) => {
+                  setItems((prev) => [...prev, makeDraft(f, "manual")]);
+                  setAdding(false);
+                }}
+              />
+            )}
+            {addTab === "search" && (
+              <Button variant="secondary" onClick={() => setAdding(false)}>
+                Listo
+              </Button>
+            )}
+          </div>
       </Sheet>
-    </form>
+    </>
   );
 }

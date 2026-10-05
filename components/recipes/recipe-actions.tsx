@@ -4,13 +4,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { addMeal, savePlanItems, paths } from "@/lib/db";
-import { useDocument } from "@/lib/hooks";
+import { addMeal, addPlanItem } from "@/lib/db";
+import { settleWrite } from "@/lib/offline";
 import { addDays, formatDayLabel, todayKey, weekDays, type DateKey } from "@/lib/dates";
 import { perServing, recipeToFoodEntry } from "@/lib/recipes";
 import { suggestMealType } from "@/lib/meals";
 import { formatInt } from "@/lib/macros";
-import type { MealPlanDay, MealType, Recipe } from "@/types";
+import type { MealType, Recipe } from "@/types";
 import { Sheet } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Stepper } from "@/components/ui/choice";
@@ -65,7 +65,9 @@ export function LogRecipeSheet({
     setSaving(true);
     setError(null);
     try {
-      await addMeal(uid, { date, type, foods: [recipeToFoodEntry(recipe, servings)], source: "recipe", title: recipe.name });
+      await settleWrite(
+        addMeal(uid, { date, type, foods: [recipeToFoodEntry(recipe, servings)], source: "recipe", title: recipe.name }),
+      );
       await onLogged?.();
       onClose();
       router.push(date === todayKey() ? "/home" : `/home?date=${date}`);
@@ -113,16 +115,13 @@ export function AddToPlanSheet({
   const [servings, setServings] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data: plan } = useDocument<MealPlanDay>(open ? `${paths.mealPlans(uid)}/${date}` : null);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const items = plan?.items ?? [];
-      await savePlanItems(uid, date, [
-        ...items,
-        {
+      await settleWrite(
+        addPlanItem(uid, date, {
           id: newId(),
           mealType: type,
           recipeId: recipe.id,
@@ -132,8 +131,8 @@ export function AddToPlanSheet({
           proteinGPerServing: recipe.proteinGPerServing,
           carbsGPerServing: recipe.carbsGPerServing,
           fatGPerServing: recipe.fatGPerServing,
-        },
-      ]);
+        }),
+      );
       onClose();
     } catch (err) {
       console.error(err);

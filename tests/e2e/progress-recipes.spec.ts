@@ -84,3 +84,25 @@ test("perfil: metas manuales y volver a automáticas", async ({ page }, testInfo
   await expect(page.getByTestId("goal-calories")).toHaveText("1.882");
   await expectNoHorizontalScroll(page);
 });
+
+test("crear receta: agregar ingrediente manual no guarda la receta antes de tiempo", async ({ page }, testInfo) => {
+  await newUserAtHome(page, testInfo);
+  await page.goto("/recipes/new");
+  await page.getByLabel("Nombre", { exact: true }).fill("Tostadas con palta");
+  await page.getByRole("button", { name: /Ingrediente/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Buscar alimento").fill("marraqueta");
+  await dialog.getByLabel("Buscar alimento").press("Enter"); // no debe enviar el formulario de la receta
+  await dialog.getByRole("button", { name: /Agregar Marraqueta/ }).click();
+  await dialog.getByRole("radio", { name: "Manual" }).click();
+  await dialog.getByLabel("Alimento").fill("Palta casera");
+  await dialog.getByLabel("Grasa").fill("10");
+  await dialog.getByRole("button", { name: "Agregar alimento" }).click();
+
+  // Seguimos en el editor, con ambos ingredientes
+  await expect(page).toHaveURL(/\/recipes\/new$/);
+  await expect(page.getByTestId("food-row")).toHaveCount(2);
+  await page.getByRole("button", { name: "Guardar receta" }).click();
+  await expect(page.getByRole("button", { name: "Registrar comida" })).toBeVisible();
+  await expect(page.getByText("Palta casera")).toBeVisible();
+});

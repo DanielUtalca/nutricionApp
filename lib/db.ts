@@ -197,6 +197,15 @@ export async function savePlanItems(uid: string, date: DateKey, items: MealPlanI
   });
 }
 
+/** Agrega un ítem sin leer el día antes (arrayUnion): no pisa ítems existentes */
+export async function addPlanItem(uid: string, date: DateKey, item: MealPlanItem): Promise<void> {
+  await setDoc(
+    doc(db, paths.mealPlans(uid), date),
+    { uid, date, items: arrayUnion(item), updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
 // ----- Lista de compras ----------------------------------------------------------
 
 export async function saveShoppingList(

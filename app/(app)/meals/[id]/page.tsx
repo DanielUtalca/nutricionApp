@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useDocument } from "@/lib/hooks";
 import { deleteMeal, paths, updateMeal } from "@/lib/db";
+import { settleWrite } from "@/lib/offline";
 import { formatDayLabel, todayKey } from "@/lib/dates";
 import type { Meal, MealType } from "@/types";
 import { Page, PageHeader, ErrorNote, EmptyState } from "@/components/ui/page";
@@ -55,7 +56,7 @@ function MealEditor({ meal, uid }: { meal: Meal; uid: string }) {
     setBusy("save");
     setError(null);
     try {
-      await updateMeal(uid, meal.id, { date: meal.date, type, title, foods: items.map((i) => i.food) });
+      await settleWrite(updateMeal(uid, meal.id, { date: meal.date, type, title, foods: items.map((i) => i.food) }));
       back();
     } catch (err) {
       console.error(err);
@@ -67,7 +68,7 @@ function MealEditor({ meal, uid }: { meal: Meal; uid: string }) {
   const remove = async () => {
     setBusy("delete");
     try {
-      await deleteMeal(uid, meal.id);
+      await settleWrite(deleteMeal(uid, meal.id));
       back();
     } catch (err) {
       console.error(err);
