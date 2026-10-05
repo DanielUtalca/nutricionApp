@@ -66,7 +66,7 @@ export function PageHeader({
 /** Mensaje de error en línea */
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="text-sm rounded-xl px-3.5 py-2.5 bg-danger-muted text-danger">
+    <p role="alert" data-testid="error-note" className="text-sm rounded-xl px-3.5 py-2.5 bg-danger-muted text-danger">
       {children}
     </p>
   );
