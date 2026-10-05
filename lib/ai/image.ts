@@ -1,7 +1,14 @@
 // Validación de imágenes recibidas por la API (puro, testeable)
 
-/** Tamaño máximo aceptado por el servidor (el cliente comprime a ~150-400 KB) */
-export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+/**
+ * Tamaño máximo aceptado por el servidor (el cliente comprime a ~150-400 KB).
+ * Vercel rechaza cuerpos de más de ~4,5 MB antes de llegar al handler, así que el tope
+ * va por debajo (3 MB + multipart). El base64 solo se usa servidor → Gemini, no cuenta.
+ */
+export const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+
+/** Tope legible para los mensajes de error ("3 MB") */
+export const MAX_IMAGE_LABEL = `${MAX_IMAGE_BYTES / (1024 * 1024)} MB`;
 
 /** Largo máximo de los textos que acompañan el análisis */
 export const MAX_HINT_LENGTH = 300;

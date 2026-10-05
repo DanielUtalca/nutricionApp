@@ -16,7 +16,9 @@ vi.mock("@/lib/server/ai-quota", () => ({
   refundDailyQuota: (...args: unknown[]) => refundDailyQuota(...args),
 }));
 
-const { POST } = await import("@/app/api/analyze-meal/route");
+const { POST, maxDuration } = await import("@/app/api/analyze-meal/route");
+const { GEMINI_TIMEOUT_MS, GEMINI_DEFAULT_RETRY_DELAY_MS } = await import("@/lib/ai/gemini");
+const { MAX_IMAGE_BYTES } = await import("@/lib/ai/image");
 const { HttpError } = await import("@/lib/server/http");
 
 // JPEG mínimo (solo importan los magic bytes para la validación)
@@ -111,12 +113,30 @@ describe("POST /api/analyze-meal — validación de entrada", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rechaza imágenes de más de 4 MB (413)", async () => {
-    const big = new Uint8Array(4 * 1024 * 1024 + 10);
+  it("rechaza imágenes de más de 3 MB (413)", async () => {
+    const big = new Uint8Array(MAX_IMAGE_BYTES + 10);
     big.set(JPEG);
     const res = await POST(photoRequest({ bytes: big }));
     expect(res.status).toBe(413);
+    expect((await res.json()).error.message).toMatch(/3 MB/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("acepta una imagen justo por debajo del tope", async () => {
+    const nearLimit = new Uint8Array(MAX_IMAGE_BYTES - 1024);
+    nearLimit.set(JPEG);
+    fetchMock.mockResolvedValue(geminiOk(goodAnalysis));
+    const res = await POST(photoRequest({ bytes: nearLimit }));
+    expect(res.status).toBe(200);
+  });
+
+  it("mantiene el tope de imagen bajo el límite de cuerpo de Vercel (4,5 MB) con margen", () => {
+    expect(MAX_IMAGE_BYTES + 64 * 1024).toBeLessThan(4.5 * 1024 * 1024);
+  });
+
+  it("el peor caso de Gemini (2 intentos + espera) cabe en maxDuration con margen", () => {
+    const worstCaseMs = 2 * GEMINI_TIMEOUT_MS + GEMINI_DEFAULT_RETRY_DELAY_MS;
+    expect(worstCaseMs + 5_000).toBeLessThan(maxDuration * 1000);
   });
 
   it("rechaza descripciones vacías (400)", async () => {

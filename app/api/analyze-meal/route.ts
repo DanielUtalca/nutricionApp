@@ -4,7 +4,7 @@
 // Analiza una comida con Gemini y devuelve alimentos + calorías + macros.
 //
 // Entrada (requiere `Authorization: Bearer <Firebase ID token>`):
-//   - multipart/form-data con `image` (JPEG/PNG/WebP ≤ 4 MB) y `hint` opcional
+//   - multipart/form-data con `image` (JPEG/PNG/WebP ≤ 3 MB) y `hint` opcional
 //   - application/json con { "description": "2 huevos revueltos y pan" }
 //
 // La imagen NO se guarda en ningún lado: se lee en memoria, se envía a
@@ -19,10 +19,12 @@ import {
   MAX_DESCRIPTION_LENGTH,
   MAX_HINT_LENGTH,
   MAX_IMAGE_BYTES,
+  MAX_IMAGE_LABEL,
   detectImageType,
 } from "@/lib/ai/image";
 
-export const maxDuration = 45;
+// Gemini: hasta 2 intentos de 22 s + 1,5 s de espera (lib/ai/gemini.ts) + auth y cuota
+export const maxDuration = 60;
 
 // Ráfagas: máx. 6 análisis por minuto por usuario (Flash-Lite free ≈ 15 RPM por proyecto)
 const limiter = createRateLimiter({ limit: 6, windowMs: 60_000 });
@@ -34,7 +36,7 @@ async function readInput(request: Request): Promise<AnalyzeInput> {
   const contentType = request.headers.get("content-type") ?? "";
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
   if (declaredLength > MAX_BODY_BYTES) {
-    throw new HttpError(413, "too_large", "La imagen es demasiado grande (máx. 4 MB).");
+    throw new HttpError(413, "too_large", `La imagen es demasiado grande (máx. ${MAX_IMAGE_LABEL}).`);
   }
 
   if (contentType.startsWith("multipart/form-data")) {
@@ -49,7 +51,7 @@ async function readInput(request: Request): Promise<AnalyzeInput> {
       throw new HttpError(400, "missing_image", "Falta la imagen.");
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      throw new HttpError(413, "too_large", "La imagen es demasiado grande (máx. 4 MB).");
+      throw new HttpError(413, "too_large", `La imagen es demasiado grande (máx. ${MAX_IMAGE_LABEL}).`);
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
     const mimeType = detectImageType(bytes);

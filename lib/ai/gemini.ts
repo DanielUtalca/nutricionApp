@@ -17,7 +17,9 @@ import type { AIAnalysisResult } from "@/types";
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const TIMEOUT_MS = 30_000;
+// Por intento. Con el reintento (+1,5 s) el peor caso son ~45,5 s: cabe en el maxDuration de la ruta (60 s)
+export const GEMINI_TIMEOUT_MS = 22_000;
+export const GEMINI_DEFAULT_RETRY_DELAY_MS = 1500;
 
 export type AIErrorCode =
   | "not_configured"
@@ -114,7 +116,7 @@ export async function analyzeWithGemini(
   }
   const model = options.model ?? (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
   const doFetch = options.fetchImpl ?? fetch;
-  const retryDelayMs = options.retryDelayMs ?? Number(process.env.GEMINI_RETRY_DELAY_MS ?? 1500);
+  const retryDelayMs = options.retryDelayMs ?? Number(process.env.GEMINI_RETRY_DELAY_MS ?? GEMINI_DEFAULT_RETRY_DELAY_MS);
 
   const request = () =>
     doFetch(`${API_BASE}/${encodeURIComponent(model)}:generateContent`, {
@@ -130,7 +132,7 @@ export async function analyzeWithGemini(
           responseSchema: RESPONSE_SCHEMA,
         },
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
 
   let res: Response;
