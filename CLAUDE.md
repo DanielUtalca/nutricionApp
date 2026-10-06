@@ -4,7 +4,7 @@
 > a medida que evolucione el diseño y la arquitectura, para que cualquier sesión
 > de trabajo (humana o de Claude Code) parta con el mismo contexto.
 >
-> Última actualización: 2026-10-05 (rama `feature/app-completa`). Producción: https://nutricion-app-theta.vercel.app (Vercel, despliegue por push a `main`; ver §6.1).
+> Última actualización: 2026-10-06 (rama `feature/app-completa`). Producción: https://nutricion-app-theta.vercel.app (Vercel, despliegue por push a `main`; ver §6.1).
 
 ## 1. Concepto
 
@@ -157,8 +157,8 @@ No se necesitan índices compuestos (las consultas usan un solo campo; el orden 
 
 **Flujo de registro por foto:**
 1. El cliente comprime la foto (canvas) y la envía directo a `/api/analyze-meal` con `Authorization: Bearer <ID token>`.
-2. El handler: verifica el token (con chequeo de revocación) → límite 6/min por usuario (memoria) → valida tamaño (≤ 3 MB; Vercel corta en ~4,5 MB) y tipo real por magic bytes (JPEG/PNG/WebP) → suma 1 al contador diario (`aiUsage`, tope `AI_DAILY_LIMIT_PER_USER`, 40 por defecto) → llama a Gemini con JSON schema → valida con Zod, acota valores y **recalcula totales**.
-3. Errores mapeados con mensajes claros: 401 sin sesión, 413/415 imagen, 422 sin comida, 429 cuota (con `Retry-After`), 503 IA caída (1 reintento automático) o mal configurada, 504 timeout. Si el fallo no es culpa del usuario se devuelve el intento del contador. Tiempos: Gemini 22 s por intento (+1,5 s de espera) < `maxDuration` 60 s; el cliente espera como máximo 55 s. Si la plataforma responde sin JSON (413/502/503/504 de Vercel), `lib/api-errors.ts` deduce el mensaje por código HTTP.
+2. El handler: verifica el token (con chequeo de revocación) → límite 6/min por usuario (memoria) → valida tamaño (≤ 3 MB; Vercel corta en ~4,5 MB) y tipo real por magic bytes (JPEG/PNG/WebP) → suma 1 al contador diario (`aiUsage`, tope `AI_DAILY_LIMIT_PER_USER`, 40 por defecto) → llama a Gemini con JSON schema (**cadena de modelos de respaldo**, ver "Modelo de IA") → valida con Zod, acota valores y **recalcula totales**.
+3. Errores mapeados con mensajes claros: 401 sin sesión, 413/415 imagen, 422 sin comida, 429 cuota (con `Retry-After`), 503 IA caída (tras probar todos los modelos) o mal configurada, 504 timeout. Si el fallo no es culpa del usuario se devuelve el intento del contador. Tiempos: 15 s por intento y 48 s en total para toda la cadena < `maxDuration` 60 s; el cliente espera como máximo 55 s. Si la plataforma responde sin JSON (413/502/503/504 de Vercel), `lib/api-errors.ts` deduce el mensaje por código HTTP.
 4. El cliente muestra la revisión; al guardar escribe en `users/{uid}/meals`. La foto nunca se persiste.
 5. Home se actualiza en tiempo real (listener de Firestore).
 
@@ -177,7 +177,7 @@ No se necesitan índices compuestos (las consultas usan un solo campo; el orden 
 - **iOS:** la PWA instalada tiene almacenamiento separado de Safari: hay que iniciar sesión dentro de la app instalada. Los navegadores integrados (Instagram, Facebook, WebViews) no pueden usar Google OAuth; el login muestra un aviso para abrir la página en Safari/Chrome.
 - **Verificación:** `PROD_URL=https://nutricion-app-theta.vercel.app npm run test:prod` (sin sesión, sin gastar cuota de IA). Con `EXPECT_REDIRECT_LOGIN=1` también comprueba que el botón de Google redirige por el dominio propio y que Google acepta la URI de redirección.
 
-**Modelo de IA:** `gemini-3.5-flash-lite` (Flash-Lite estable vigente en oct-2026 según https://ai.google.dev/gemini-api/docs/models), vía REST `v1beta/models/{model}:generateContent`, clave en header `x-goog-api-key`. Configurable con `GEMINI_MODEL`. La cuota gratuita es por proyecto y compartida por todo el grupo; verificar límites vigentes en https://aistudio.google.com/rate-limit (Google no los publica en la documentación).
+**Modelo de IA:** `gemini-3.5-flash-lite` (Flash-Lite estable vigente en oct-2026 según https://ai.google.dev/gemini-api/docs/models), vía REST `v1beta/models/{model}:generateContent`, clave en header `x-goog-api-key`. Configurable con `GEMINI_MODEL`. **Respaldo automático** (`GEMINI_FALLBACK_MODELS`, por defecto `gemma-4-26b-a4b-it` → `gemini-3.1-flash-lite` → `gemini-flash-lite-latest`; `none` lo desactiva): ante 503/500, 429, 404, timeout o respuesta vacía/incompleta se prueba el siguiente modelo, porque cada uno tiene su propia capacidad y cuota. Los errores de clave/permisos (400 api key, 401, 403), el contenido bloqueado y "no es comida" no pasan a otro modelo. Con un solo modelo se mantiene 1 reintento tras 1,5 s. Los modelos 2.5 ya no están disponibles para claves nuevas (404). La cuota gratuita es por proyecto y compartida por todo el grupo; verificar límites vigentes en https://aistudio.google.com/rate-limit (Google no los publica en la documentación).
 
 **Política de fotos:** no se usa Firebase Storage. La imagen solo existe en memoria del navegador y del servidor durante el análisis. Mejora futura: miniatura ~200 px (requeriría Storage y abrir `storage.rules` para `users/{uid}/…`).
 
@@ -230,6 +230,7 @@ color usado solo para dar significado, no decoración.
 15. **Credenciales Admin normalizadas** (`lib/server/service-account.ts`): el JSON de la service account pegado en Vercel suele venir con comillas, saltos de línea reales o `\n` doblemente escapado; se normaliza y los errores no incluyen secretos.
 16. **`jwks-rsa` 3 bajo `firebase-admin`** (`overrides` en `package.json`): `firebase-admin` 14 trae `jwks-rsa` ^4 → `jose` 6 (solo ESM) y `firebase-admin/auth` hace `require()` de él al cargar. Vercel (AWS Lambda) ejecuta Node sin `require()` de ESM, así que en producción `/api/analyze-meal` respondía 500 (`ERR_REQUIRE_ESM`) aunque en local funcionaba. `firebase-admin` solo usa `jwks-rsa` para URLs JWKS (no para verificar ID tokens de Firebase, que usan certificados X.509), así que la versión 3 (CJS, `jose` 4) es suficiente. `tests/unit/firebase-admin-load.test.ts` carga los puntos de entrada con `--no-experimental-require-module` para detectar regresiones al actualizar dependencias. Si se quita el override, revisar que `firebase-admin` ya no necesite `require(esm)`.
 17. **Humo contra producción sin sesión** (`tests/prod`): el login real de Google no se puede automatizar y `__testSignIn` no existe fuera de los emuladores; solo se prueba lo público (login, manifest/instalabilidad, `/__/auth/*`, 401 de la API). El flujo con sesión se prueba a mano en el teléfono.
+18. **Cadena de modelos de respaldo** (oct-2026): en producción las fotos fallaban con "La IA está saturada": el plan gratuito devolvía 503 "high demand" de forma intermitente en casi todos los modelos Gemini, y `gemini-3.5-flash-lite` a veces tardaba 30-60 s. Reintentar el mismo modelo no servía; pasar a otro sí (en las pruebas Gemma 4 26B respondió siempre, en ~3-10 s, con calidad aceptable). Ver `DEFAULT_GEMINI_FALLBACK_MODELS` en `lib/ai/gemini.ts`.
 
 ## 10. Pendientes / ideas futuras
 
