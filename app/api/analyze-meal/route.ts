@@ -23,7 +23,7 @@ import {
   detectImageType,
 } from "@/lib/ai/image";
 
-// Gemini: hasta 2 intentos de 22 s + 1,5 s de espera (lib/ai/gemini.ts) + auth y cuota
+// Gemini: modelo principal + respaldos en ≤ 48 s en total (lib/ai/gemini.ts) + auth y cuota
 export const maxDuration = 60;
 
 // Ráfagas: máx. 6 análisis por minuto por usuario (Flash-Lite free ≈ 15 RPM por proyecto)

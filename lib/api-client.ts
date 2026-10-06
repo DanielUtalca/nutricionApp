@@ -8,7 +8,7 @@ import type { AIAnalysisResult, MealSource } from "@/types";
 
 /**
  * Tiempo máximo de espera. El servidor corta a los 60 s (maxDuration) y su peor
- * caso con reintento a Gemini ronda los 46 s: esperar un poco más que eso evita
+ * caso probando los modelos de respaldo de Gemini es ~48 s: esperar un poco más que eso evita
  * dejar al usuario mirando "Analizando…" sin fin si la conexión se cuelga.
  */
 export const REQUEST_TIMEOUT_MS = 55_000;
