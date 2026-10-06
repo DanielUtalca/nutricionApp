@@ -45,6 +45,7 @@ Todas están documentadas en [`.env.example`](.env.example). **Nunca subas `.env
 | `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` **o** `FIREBASE_ADMIN_PROJECT_ID` + `FIREBASE_ADMIN_CLIENT_EMAIL` + `FIREBASE_ADMIN_PRIVATE_KEY` | Sí | Servidor (`/api/analyze-meal`) | Consola de Firebase → Cuentas de servicio → Generar nueva clave privada. El JSON va **en una sola línea**; si defines ambas opciones, gana el JSON |
 | `GEMINI_API_KEY` | Sí (para la IA) | Servidor | [Google AI Studio](https://aistudio.google.com/apikey) |
 | `GEMINI_MODEL` | No | Servidor | Por defecto `gemini-3.5-flash-lite`. Cámbialo si Google renombra el modelo |
+| `GEMINI_FALLBACK_MODELS` | No | Servidor | Modelos de respaldo si el principal está saturado (503), sin cuota (429), lento o retirado. Por defecto `gemma-4-26b-a4b-it,gemini-3.1-flash-lite,gemini-flash-lite-latest`; `none` los desactiva |
 | `AI_DAILY_LIMIT_PER_USER` | No | Servidor | Máximo de análisis con IA por persona y día (por defecto 40) |
 | `NEXT_PUBLIC_USE_FIREBASE_EMULATORS` | No | Solo pruebas | `true` conecta la app a los emuladores. **No usar en producción** |
 
@@ -171,6 +172,7 @@ tests/unit · tests/rules · tests/e2e · tests/prod (humo contra producción)
 | --- | --- |
 | "Se alcanzó el límite gratuito de la IA" | Cuota de Gemini agotada por ahora. Espera o usa Buscar/Manual. Revisa límites en [AI Studio → Rate limits](https://aistudio.google.com/rate-limit) |
 | "El modelo … no está disponible. Actualiza GEMINI_MODEL" | Google renombró/retiró el modelo. Consulta [la lista de modelos](https://ai.google.dev/gemini-api/docs/models) y define `GEMINI_MODEL` |
+| "La IA está saturada en este momento" (503) | Todos los modelos de la cadena (`GEMINI_MODEL` + `GEMINI_FALLBACK_MODELS`) respondieron 503/500 en el plan gratuito. Suele pasar en minutos; los logs de Vercel muestran qué respondió cada modelo (`Gemini (<modelo>) respondió …`) |
 | "No se pudo verificar tu sesión" (503) | Faltan o están mal las credenciales de Firebase Admin en el servidor |
 | El login con Google se cierra con error en producción | Agrega el dominio a *Dominios autorizados* en Firebase Auth |
 | `permission-denied` en consola | Publica `firestore.rules` (sección 6.1) |

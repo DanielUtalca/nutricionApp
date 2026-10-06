@@ -16,9 +16,23 @@ import type { AIAnalysisResult } from "@/types";
  */
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 
+/**
+ * Modelos de respaldo, en orden. En el plan gratuito un modelo responde seguido
+ * 503 ("high demand") o se cuelga mientras otro responde en 2-5 s; cada modelo
+ * tiene su propia capacidad y cuota, así que se pasa al siguiente en vez de
+ * esperar. Gemma 4 corre aparte y fue el más estable en las pruebas (oct-2026).
+ * Configurable con GEMINI_FALLBACK_MODELS (separados por coma; "none" = sin respaldo).
+ */
+export const DEFAULT_GEMINI_FALLBACK_MODELS = ["gemma-4-26b-a4b-it", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"];
+
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-// Por intento. Con el reintento (+1,5 s) el peor caso son ~45,5 s: cabe en el maxDuration de la ruta (60 s)
-export const GEMINI_TIMEOUT_MS = 22_000;
+// Por intento: Flash-Lite responde en 2-8 s y Gemma en ~10 s; si un modelo se cuelga conviene probar el siguiente
+export const GEMINI_TIMEOUT_MS = 15_000;
+// Tiempo total de todos los intentos: cabe en el maxDuration de la ruta (60 s) y en el timeout del cliente (55 s)
+export const GEMINI_TOTAL_BUDGET_MS = 48_000;
+// No se empieza un intento con menos tiempo que esto
+const MIN_ATTEMPT_MS = 4_000;
+// Espera antes de reintentar cuando hay un solo modelo configurado
 export const GEMINI_DEFAULT_RETRY_DELAY_MS = 1500;
 
 export type AIErrorCode =
@@ -37,11 +51,15 @@ export class AIServiceError extends Error {
     readonly code: AIErrorCode,
     readonly status: number,
     readonly retryAfterSeconds?: number,
+    /** true si otro modelo podría responder (saturación, cuota del modelo, timeout, modelo retirado) */
+    readonly tryNextModel = false,
   ) {
     super(message);
     this.name = "AIServiceError";
   }
 }
+
+const UNAVAILABLE_MESSAGE = "La IA está saturada en este momento. Intenta en un minuto.";
 
 const SYSTEM_PROMPT = `Eres un nutricionista que estima el contenido nutricional de comidas para una app de registro de dieta usada en Chile.
 
@@ -91,6 +109,8 @@ export type AnalyzeInput =
   | { kind: "image"; mimeType: string; base64: string; hint?: string }
   | { kind: "text"; description: string };
 
+type AnalysisWithTitle = AIAnalysisResult & { title?: string };
+
 function buildParts(input: AnalyzeInput) {
   if (input.kind === "image") {
     const instruction = input.hint
@@ -111,20 +131,25 @@ function retryAfterSeconds(res: Response, body: unknown): number | undefined {
   return Number.isFinite(seconds) ? Math.ceil(seconds) : undefined;
 }
 
-export async function analyzeWithGemini(
-  input: AnalyzeInput,
-  options: { fetchImpl?: typeof fetch; apiKey?: string; model?: string; retryDelayMs?: number } = {},
-): Promise<AIAnalysisResult & { title?: string }> {
-  const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new AIServiceError("El análisis con IA no está configurado en el servidor.", "not_configured", 503);
-  }
-  const model = options.model ?? (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
-  const doFetch = options.fetchImpl ?? fetch;
-  const retryDelayMs = options.retryDelayMs ?? Number(process.env.GEMINI_RETRY_DELAY_MS ?? GEMINI_DEFAULT_RETRY_DELAY_MS);
+/** Modelo principal + respaldos, sin repetidos */
+export function geminiModelChain(primary?: string, fallbacks?: string): string[] {
+  const main = primary || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+  const raw = (fallbacks ?? process.env.GEMINI_FALLBACK_MODELS ?? "").trim();
+  let extra: string[];
+  if (raw.toLowerCase() === "none") extra = [];
+  else if (raw) extra = raw.split(",").map((m) => m.trim()).filter(Boolean);
+  else extra = DEFAULT_GEMINI_FALLBACK_MODELS;
+  return [...new Set([main, ...extra])];
+}
 
-  const request = () =>
-    doFetch(`${API_BASE}/${encodeURIComponent(model)}:generateContent`, {
+type AttemptOptions = { doFetch: typeof fetch; apiKey: string; model: string; timeoutMs: number };
+
+/** Un intento contra un modelo. Lanza AIServiceError con tryNextModel si conviene probar otro */
+async function analyzeOnce(input: AnalyzeInput, { doFetch, apiKey, model, timeoutMs }: AttemptOptions): Promise<AnalysisWithTitle> {
+  let res: Response;
+  let body: unknown;
+  try {
+    res = await doFetch(`${API_BASE}/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
@@ -137,39 +162,33 @@ export async function analyzeWithGemini(
           responseSchema: RESPONSE_SCHEMA,
         },
       }),
-      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-
-  let res: Response;
-  try {
-    res = await request();
-    // Los 500/503 de Gemini ("alta demanda") suelen ser momentáneos: un reintento
-    if (res.status >= 500 && retryDelayMs >= 0) {
-      await new Promise((r) => setTimeout(r, retryDelayMs));
-      res = await request();
-    }
+    body = await res.json().catch(() => null);
   } catch (err) {
     if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-      throw new AIServiceError("La IA tardó demasiado en responder. Intenta de nuevo.", "timeout", 504);
+      console.error(`Gemini (${model}) no respondió en ${timeoutMs} ms`);
+      throw new AIServiceError("La IA tardó demasiado en responder. Intenta de nuevo.", "timeout", 504, undefined, true);
     }
-    throw new AIServiceError("No se pudo contactar al servicio de IA.", "unavailable", 502);
+    console.error(`Gemini (${model}): error de red`);
+    throw new AIServiceError("No se pudo contactar al servicio de IA.", "unavailable", 502, undefined, true);
   }
-
-  const body: unknown = await res.json().catch(() => null);
 
   if (!res.ok) {
     const status = res.status;
     const googleMessage = (body as { error?: { message?: string } })?.error?.message ?? "";
     // No se registra el cuerpo completo para no filtrar datos; solo estado y mensaje
-    console.error(`Gemini respondió ${status}: ${googleMessage.slice(0, 200)}`);
+    console.error(`Gemini (${model}) respondió ${status}: ${googleMessage.slice(0, 200)}`);
     if (status === 429) {
       throw new AIServiceError(
         "Se alcanzó el límite gratuito de la IA por ahora. Prueba en un rato o registra la comida a mano.",
         "quota",
         429,
         retryAfterSeconds(res, body),
+        true,
       );
     }
+    // Problemas de clave o permisos afectan a todos los modelos: no se prueba otro
     if (status === 400 && /api key/i.test(googleMessage)) {
       throw new AIServiceError("La clave de la IA no es válida (revisar configuración).", "not_configured", 503);
     }
@@ -181,10 +200,12 @@ export async function analyzeWithGemini(
         `El modelo "${model}" no está disponible. Actualiza GEMINI_MODEL.`,
         "not_configured",
         503,
+        undefined,
+        true,
       );
     }
     if (status >= 500) {
-      throw new AIServiceError("La IA está saturada en este momento. Intenta en un minuto.", "unavailable", 503);
+      throw new AIServiceError(UNAVAILABLE_MESSAGE, "unavailable", 503, undefined, true);
     }
     throw new AIServiceError("La IA rechazó la petición.", "bad_response", 502);
   }
@@ -200,12 +221,10 @@ export async function analyzeWithGemini(
   const candidate = data?.candidates?.[0];
   const text = candidate?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   if (!text) {
-    const blocked = candidate?.finishReason === "SAFETY" || candidate?.finishReason === "PROHIBITED_CONTENT";
-    throw new AIServiceError(
-      blocked ? "La IA no pudo procesar esta imagen." : "La IA no devolvió resultados. Intenta de nuevo.",
-      blocked ? "blocked" : "bad_response",
-      blocked ? 422 : 502,
-    );
+    if (candidate?.finishReason === "SAFETY" || candidate?.finishReason === "PROHIBITED_CONTENT") {
+      throw new AIServiceError("La IA no pudo procesar esta imagen.", "blocked", 422);
+    }
+    throw new AIServiceError("La IA no devolvió resultados. Intenta de nuevo.", "bad_response", 502, undefined, true);
   }
 
   try {
@@ -218,8 +237,75 @@ export async function analyzeWithGemini(
       if (err.code === "no_foods") {
         throw new AIServiceError("La IA no reconoció alimentos. Prueba con otra foto o descríbelo.", "no_foods", 422);
       }
-      throw new AIServiceError("La respuesta de la IA vino incompleta. Intenta de nuevo.", "bad_response", 502);
+      throw new AIServiceError("La respuesta de la IA vino incompleta. Intenta de nuevo.", "bad_response", 502, undefined, true);
     }
     throw err;
   }
+}
+
+/**
+ * Error final cuando ningún modelo respondió, priorizando lo más útil para el
+ * usuario: saturación > timeout > cuota > modelo inexistente > respuesta inválida.
+ */
+function pickFinalError(errors: AIServiceError[]): AIServiceError {
+  const priority: AIErrorCode[] = ["unavailable", "timeout", "quota", "not_configured", "bad_response"];
+  for (const code of priority) {
+    const matching = errors.filter((e) => e.code === code);
+    if (matching.length === 0) continue;
+    if (code === "unavailable") return new AIServiceError(UNAVAILABLE_MESSAGE, "unavailable", 503);
+    if (code === "quota") {
+      const waits = matching.map((e) => e.retryAfterSeconds).filter((n): n is number => n !== undefined);
+      return new AIServiceError(matching[0].message, "quota", 429, waits.length ? Math.min(...waits) : undefined);
+    }
+    return matching[0];
+  }
+  return errors[errors.length - 1];
+}
+
+export async function analyzeWithGemini(
+  input: AnalyzeInput,
+  options: {
+    fetchImpl?: typeof fetch;
+    apiKey?: string;
+    model?: string;
+    fallbackModels?: string;
+    retryDelayMs?: number;
+    budgetMs?: number;
+  } = {},
+): Promise<AnalysisWithTitle> {
+  const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new AIServiceError("El análisis con IA no está configurado en el servidor.", "not_configured", 503);
+  }
+  const chain = geminiModelChain(options.model, options.fallbackModels);
+  const doFetch = options.fetchImpl ?? fetch;
+  const retryDelayMs = options.retryDelayMs ?? Number(process.env.GEMINI_RETRY_DELAY_MS ?? GEMINI_DEFAULT_RETRY_DELAY_MS);
+  const deadline = Date.now() + (options.budgetMs ?? GEMINI_TOTAL_BUDGET_MS);
+
+  // Con un solo modelo se conserva un reintento tras una espera corta (los 503 suelen ser momentáneos)
+  const attempts = chain.length === 1 ? [chain[0], chain[0]] : chain;
+  const errors: AIServiceError[] = [];
+
+  for (const [i, model] of attempts.entries()) {
+    if (i > 0 && chain.length === 1) {
+      if (errors[errors.length - 1].code !== "unavailable" || retryDelayMs < 0) break;
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+    }
+    const remaining = deadline - Date.now();
+    if (i > 0 && remaining < MIN_ATTEMPT_MS) break;
+    try {
+      const result = await analyzeOnce(input, {
+        doFetch,
+        apiKey,
+        model,
+        timeoutMs: Math.max(1, Math.min(GEMINI_TIMEOUT_MS, remaining)),
+      });
+      if (i > 0) console.warn(`Gemini: respondió el modelo de respaldo ${model}`);
+      return result;
+    } catch (err) {
+      if (!(err instanceof AIServiceError) || !err.tryNextModel) throw err;
+      errors.push(err);
+    }
+  }
+  throw pickFinalError(errors);
 }

@@ -17,7 +17,10 @@ vi.mock("@/lib/server/ai-quota", () => ({
 }));
 
 const { POST, maxDuration } = await import("@/app/api/analyze-meal/route");
-const { GEMINI_TIMEOUT_MS, GEMINI_DEFAULT_RETRY_DELAY_MS } = await import("@/lib/ai/gemini");
+const { GEMINI_TIMEOUT_MS, GEMINI_TOTAL_BUDGET_MS, GEMINI_DEFAULT_RETRY_DELAY_MS, DEFAULT_GEMINI_FALLBACK_MODELS } =
+  await import("@/lib/ai/gemini");
+// REQUEST_TIMEOUT_MS de lib/api-client.ts (no se importa: depende del SDK de Firebase del cliente)
+const ANALYZE_TIMEOUT_MS = 55_000;
 const { MAX_IMAGE_BYTES } = await import("@/lib/ai/image");
 const { HttpError } = await import("@/lib/server/http");
 
@@ -74,6 +77,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubEnv("GEMINI_API_KEY", "test-key");
   vi.stubEnv("GEMINI_MODEL", "");
+  vi.stubEnv("GEMINI_FALLBACK_MODELS", "");
   vi.stubEnv("GEMINI_RETRY_DELAY_MS", "0");
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -134,9 +138,11 @@ describe("POST /api/analyze-meal — validación de entrada", () => {
     expect(MAX_IMAGE_BYTES + 64 * 1024).toBeLessThan(4.5 * 1024 * 1024);
   });
 
-  it("el peor caso de Gemini (2 intentos + espera) cabe en maxDuration con margen", () => {
-    const worstCaseMs = 2 * GEMINI_TIMEOUT_MS + GEMINI_DEFAULT_RETRY_DELAY_MS;
-    expect(worstCaseMs + 5_000).toBeLessThan(maxDuration * 1000);
+  it("el peor caso de Gemini (todos los modelos) cabe en maxDuration y en el timeout del cliente", () => {
+    expect(GEMINI_TOTAL_BUDGET_MS + 5_000).toBeLessThan(maxDuration * 1000);
+    expect(GEMINI_TOTAL_BUDGET_MS + 5_000).toBeLessThan(ANALYZE_TIMEOUT_MS);
+    // Con un solo modelo: 2 intentos + espera
+    expect(2 * GEMINI_TIMEOUT_MS + GEMINI_DEFAULT_RETRY_DELAY_MS).toBeLessThan(GEMINI_TOTAL_BUDGET_MS);
   });
 
   it("rechaza descripciones vacías (400)", async () => {
@@ -192,8 +198,8 @@ describe("POST /api/analyze-meal — análisis", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("gemini-9-flash-lite:generateContent");
   });
 
-  it("cuota de Gemini agotada → 429 con mensaje claro y Retry-After; se devuelve el intento", async () => {
-    fetchMock.mockResolvedValue(
+  it("cuota de Gemini agotada en todos los modelos → 429 con mensaje claro y Retry-After; se devuelve el intento", async () => {
+    fetchMock.mockImplementation(async () =>
       new Response(
         JSON.stringify({
           error: {
@@ -240,8 +246,8 @@ describe("POST /api/analyze-meal — análisis", () => {
     expect((await res.json()).error.code).toBe("not_food");
   });
 
-  it("respuesta corrupta de la IA → 502 y se devuelve el intento", async () => {
-    fetchMock.mockResolvedValue(
+  it("respuesta corrupta de la IA en todos los modelos → 502 y se devuelve el intento", async () => {
+    fetchMock.mockImplementation(async () =>
       new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "lo siento, no puedo" }] } }] }), {
         status: 200,
       }),
@@ -251,31 +257,101 @@ describe("POST /api/analyze-meal — análisis", () => {
     expect(refundDailyQuota).toHaveBeenCalled();
   });
 
-  it("IA caída (500 dos veces) → 503 unavailable tras un reintento", async () => {
+  it("IA caída en todos los modelos (500) → 503 unavailable tras probar cada respaldo", async () => {
     fetchMock.mockImplementation(async () => new Response("{}", { status: 500 }));
     const res = await POST(photoRequest());
     expect(res.status).toBe(503);
     expect((await res.json()).error.code).toBe("unavailable");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1 + DEFAULT_GEMINI_FALLBACK_MODELS.length);
+    expect(refundDailyQuota).toHaveBeenCalled();
   });
 
-  it("alta demanda momentánea (503) → reintenta y responde 200", async () => {
+  it("modelo principal saturado (503) → responde el primer respaldo", async () => {
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "high demand" } }), { status: 503 }))
       .mockResolvedValueOnce(geminiOk(goodAnalysis));
     const res = await POST(photoRequest());
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain("gemini-3.5-flash-lite:generateContent");
+    expect(fetchMock.mock.calls[1][0]).toContain(`${DEFAULT_GEMINI_FALLBACK_MODELS[0]}:generateContent`);
   });
 
-  it("errores 4xx no se reintentan", async () => {
+  it("cuota agotada solo en un modelo (429) → prueba el siguiente", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "exhausted" } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(geminiOk(goodAnalysis));
+    const res = await POST(photoRequest());
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("un modelo que se cuelga se corta y responde el respaldo", async () => {
+    fetchMock
+      .mockRejectedValueOnce(Object.assign(new Error("timeout"), { name: "TimeoutError" }))
+      .mockResolvedValueOnce(geminiOk(goodAnalysis));
+    const res = await POST(photoRequest());
+    expect(res.status).toBe(200);
+    // Cada intento tiene su propio timeout
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("saturación + timeout mezclados → 503 unavailable (no 504)", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("gemma")) throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      return new Response("{}", { status: 503 });
+    });
+    const res = await POST(photoRequest());
+    expect(res.status).toBe(503);
+  });
+
+  it("GEMINI_FALLBACK_MODELS define la cadena; con un solo modelo se reintenta una vez", async () => {
+    vi.stubEnv("GEMINI_FALLBACK_MODELS", "none");
+    fetchMock.mockImplementation(async () => new Response("{}", { status: 503 }));
+    expect((await POST(photoRequest())).status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("gemini-3.5-flash-lite:generateContent");
+
+    fetchMock.mockReset().mockImplementation(async () => new Response("{}", { status: 503 }));
+    vi.stubEnv("GEMINI_FALLBACK_MODELS", "modelo-a, modelo-b");
+    await POST(photoRequest());
+    expect(fetchMock.mock.calls.map(([url]) => String(url).match(/models\/([^:]+)/)?.[1])).toEqual([
+      "gemini-3.5-flash-lite",
+      "modelo-a",
+      "modelo-b",
+    ]);
+  });
+
+  it("errores 4xx no se reintentan ni pasan a otro modelo", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { message: "bad" } }), { status: 400 }));
     await POST(photoRequest());
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("modelo inexistente (404) → 503 con indicación de actualizar GEMINI_MODEL", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { message: "not found" } }), { status: 404 }));
+  it("clave inválida (403) no prueba otros modelos", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { message: "denied" } }), { status: 403 }));
+    const res = await POST(photoRequest());
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("not_configured");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("foto sin comida no prueba otros modelos", async () => {
+    fetchMock.mockResolvedValue(geminiOk({ isFood: false, foods: [], confidence: "high" }));
+    await POST(photoRequest());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("modelo principal retirado (404) → usa el respaldo", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "not found" } }), { status: 404 }))
+      .mockResolvedValueOnce(geminiOk(goodAnalysis));
+    expect((await POST(photoRequest())).status).toBe(200);
+  });
+
+  it("todos los modelos inexistentes (404) → 503 con indicación de actualizar GEMINI_MODEL", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: { message: "not found" } }), { status: 404 }));
     const res = await POST(photoRequest());
     expect(res.status).toBe(503);
     expect((await res.json()).error.message).toMatch(/GEMINI_MODEL/);
